@@ -35,6 +35,6 @@ Windows x64 本地音乐与 Navidrome 播放器。
 
 ## 组件
 
-播放器源码按 GPL-3.0-or-later 发布。libmpv 和 .NET 的来源与许可见 `licenses`；MiSans 字体仅用于应用界面，遵循小米的字体许可。图标原图在 `design`。
+播放器源码按 GPL-3.0-or-later 发布。libmpv 的来源与许可见 `licenses`；MiSans 字体仅用于应用界面，遵循小米的字体许可。图标原图在 `design`。
 
 项目结构：`src` 为源码，`tools` 为构建和素材转换脚本，`design` 为最终图标，`docs` 为界面截图与验证记录，`licenses` 为第三方许可。`dist` 为本地构建结果，`.local` 为私有配置和构建环境，两者不上传。

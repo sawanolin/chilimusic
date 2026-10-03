@@ -1,0 +1,16 @@
+MiSans font notice
+
+This product uses MiSans Fonts provided by Xiaomi Inc.
+本产品使用了小米公司（Xiaomi Inc.）提供的 MiSans 字体。
+
+MiSans is used under the MiSans Fonts Intellectual Property License Agreement.
+The font is embedded only for rendering this application's user interface; it
+must not be extracted, leased, sublicensed, lent, or redistributed separately.
+The font has not been modified or redeveloped by this project.
+
+Official license and download page:
+https://hyperos.mi.com/font/en/download/
+
+If the official agreement changes or the intended distribution method is not
+covered, the releasing entity must obtain Xiaomi's written clarification before
+commercial distribution.

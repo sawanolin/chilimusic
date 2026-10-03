@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>chilimusic</AssemblyName>
+    <ApplicationIcon>Resources/player.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>1.0.0</Version>
+    <Product>chilimusic</Product>
+    <Description>本地音乐与 Navidrome 播放器</Description>
+    <RootNamespace>ChiliMusic</RootNamespace>
+    <Company>Chili</Company>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="Native/mpv-2.dll" CopyToOutputDirectory="PreserveNewest" Link="mpv-2.dll" />
+    <Resource Include="Resources/player.ico" />
+    <Resource Include="Resources/chilimusic.png" />
+    <Resource Include="Resources/Fonts/*.ttf" Condition="'$(IncludeMiSans)' != 'false'" />
+  </ItemGroup>
+</Project>

@@ -10,7 +10,3 @@ The font has not been modified or redeveloped by this project.
 
 Official license and download page:
 https://hyperos.mi.com/font/en/download/
-
-If the official agreement changes or the intended distribution method is not
-covered, the releasing entity must obtain Xiaomi's written clarification before
-commercial distribution.

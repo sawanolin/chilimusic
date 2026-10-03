@@ -102,4 +102,3 @@ public sealed class TaskbarService : IDisposable
         protected override void Dispose(bool disposing) { if (disposing) { _cover?.Dispose(); _tips.Dispose(); } base.Dispose(disposing); }
     }
 }
-

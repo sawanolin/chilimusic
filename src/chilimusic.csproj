@@ -13,6 +13,7 @@
     <ApplicationIcon>Resources/player.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Version>1.0.0</Version>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <Product>chilimusic</Product>
     <Description>本地音乐与 Navidrome 播放器</Description>
     <RootNamespace>ChiliMusic</RootNamespace>

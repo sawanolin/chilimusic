@@ -17,7 +17,7 @@ jobs:
       - name: Prepare libmpv
         shell: pwsh
         run: ./tools/setup-native.ps1
-      - name: Build portable player
+      - name: Build player without bundled .NET
         shell: pwsh
         run: ./tools/build.ps1 -OutputDirectory ./dist
       - name: Upload build

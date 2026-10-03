@@ -13,4 +13,3 @@ internal sealed class PlayerMenuRenderer : ToolStripProfessionalRenderer
     protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e) { using var pen = new Pen(Theme.IsDark ? System.Drawing.Color.FromArgb(53, 64, 78) : System.Drawing.Color.FromArgb(223, 228, 234)); e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1); }
     protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e) { using var pen = new Pen(Theme.IsDark ? System.Drawing.Color.FromArgb(53, 64, 78) : System.Drawing.Color.FromArgb(223, 228, 234)); e.Graphics.DrawLine(pen, 12, e.Item.Height / 2, e.Item.Width - 12, e.Item.Height / 2); }
 }
-

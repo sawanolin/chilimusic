@@ -2,9 +2,9 @@
 
 Windows x64 本地音乐与 Navidrome 播放器。
 
-![主界面](docs/images/main-light.png)
+![Navidrome 专辑与正在播放的主界面](docs/images/main-server.png)
 
-![设置](docs/images/settings-light.png)
+![带专辑封面的任务栏播放控件](docs/images/taskbar-playing.png)
 
 ## 使用
 

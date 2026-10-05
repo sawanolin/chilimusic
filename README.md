@@ -38,7 +38,7 @@ chilimusic 是一款面向 Windows 的音乐播放器，支持本地音乐与 Na
 运行环境：Windows 10 / 11（x64），[.NET 8 Desktop Runtime（x64）](https://dotnet.microsoft.com/download/dotnet/8.0)。
 
 1. 安装 .NET 8 Desktop Runtime，选择 **Windows · x64**。
-2. 从 [Releases](https://github.com/sawanolin/chilimusic/releases/latest) 下载 `chilimusic-1.1.0-win-x64.zip`。
+2. 从 [Releases](https://github.com/sawanolin/chilimusic/releases/latest) 下载 `chilimusic-1.1.1-win-x64.zip`。
 3. 解压到任意文件夹，运行 `chilimusic.exe`。保留解压后的同目录文件。
 
 下载页面同时提供 `SHA256SUMS.txt`，可用于校验压缩包。
@@ -61,7 +61,7 @@ chilimusic 是一款面向 Windows 的音乐播放器，支持本地音乐与 Na
 
 顶部搜索栏支持搜索歌曲、专辑和歌手；在“本地音乐”页面搜索时，会搜索已导入的本地文件。
 
-结果上方可切换分类和格式，也可输入歌手或专辑名称进行筛选。点击搜索框右侧的“×”清空搜索。专辑列表滚动到底部会继续加载，也可点击“加载更多”；排序菜单提供专辑名、歌手名、最近添加与播放频次等顺序。
+结果上方可切换分类和格式，点击“筛选”可输入歌手或专辑名称。点击搜索框右侧的“×”清空搜索。专辑列表滚动到底部会继续加载，也可点击“加载更多”；排序菜单提供专辑名、歌手名、最近添加与播放频次等顺序。
 
 ### 管理播放队列
 

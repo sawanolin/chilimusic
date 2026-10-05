@@ -33,12 +33,30 @@ public static class Theme
     }
     private static void ApplyAccent()
     {
+        Color fill;
         if (_coverAccent is not Color c)
         {
             Application.Current.Resources["AccentBrush"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(IsDark ? "#6F9FEF" : "#3478F6"));
-            Application.Current.Resources["SelectedBrush"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(IsDark ? "#203B63" : "#DDE9FB")); return;
+            Application.Current.Resources["SelectedBrush"] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(IsDark ? "#203B63" : "#DDE9FB"));
+            fill = (Color)ColorConverter.ConvertFromString(IsDark ? "#6F9FEF" : "#2563EB");
         }
-        var brush = new SolidColorBrush(c); brush.Freeze(); Application.Current.Resources["AccentBrush"] = brush;
-        var selected = new SolidColorBrush(Color.FromArgb(IsDark ? (byte)65 : (byte)26, c.R, c.G, c.B)); selected.Freeze(); Application.Current.Resources["SelectedBrush"] = selected;
+        else
+        {
+            var brush = new SolidColorBrush(c); brush.Freeze(); Application.Current.Resources["AccentBrush"] = brush;
+            var selected = new SolidColorBrush(Color.FromArgb(IsDark ? (byte)65 : (byte)26, c.R, c.G, c.B)); selected.Freeze(); Application.Current.Resources["SelectedBrush"] = selected;
+            fill = c;
+        }
+        // Keep text readable on the filled buttons for both themes and cover accents.
+        var darkText = Color.FromRgb(14, 23, 40);
+        bool white = Contrast(fill, Colors.White) >= Contrast(fill, darkText);
+        if (!white && Contrast(fill, darkText) < 4.5) darkText = Colors.Black;
+        Color Mix(Color color, double amount) => Color.FromRgb((byte)(color.R * (1 - amount) + (white ? 0 : 255) * amount), (byte)(color.G * (1 - amount) + (white ? 0 : 255) * amount), (byte)(color.B * (1 - amount) + (white ? 0 : 255) * amount));
+        Set("AccentFillBrush", fill); Set("AccentForegroundBrush", white ? Colors.White : darkText); Set("AccentHoverBrush", Mix(fill, .10)); Set("AccentPressedBrush", Mix(fill, .18));
+        static void Set(string key, Color color) { var brush = new SolidColorBrush(color); brush.Freeze(); Application.Current.Resources[key] = brush; }
+    }
+    internal static double Contrast(Color first, Color second)
+    {
+        static double Luminance(Color color) { static double Linear(byte value) { double v = value / 255d; return v <= .04045 ? v / 12.92 : Math.Pow((v + .055) / 1.055, 2.4); } return .2126 * Linear(color.R) + .7152 * Linear(color.G) + .0722 * Linear(color.B); }
+        double a = Luminance(first), b = Luminance(second); return (Math.Max(a, b) + .05) / (Math.Min(a, b) + .05);
     }
 }

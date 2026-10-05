@@ -8,11 +8,12 @@ public partial class SettingsWindow : Window
     public SettingsWindow(PlayerViewModel vm)
     {
         InitializeComponent(); WindowAppearance.Attach(this); _vm = vm;
-        _options = new(vm); AdvancedOptions.Content = _options;
+        _options = new(vm); AudioOptions.Content = _options.Page("音频输出"); TaskbarOptions.Content = _options.Page("任务栏"); HotkeyOptions.Content = _options.Page("快捷键"); FolderOptions.Content = _options.Page("本地音乐目录"); CacheOptions.Content = _options.Page("离线缓存"); AppearanceOptions.Content = _options.AccentOption;
         ServerBox.Text = vm.Settings.Server; UsernameBox.Text = vm.Settings.Username; RememberCheck.IsChecked = vm.Settings.Remember; UntrustedCheck.IsChecked = vm.Settings.AllowUntrustedCertificate;
         StartupCheck.IsChecked = vm.Settings.StartWithWindows; TrayCheck.IsChecked = vm.Settings.StartInTray; CloseCheck.IsChecked = vm.Settings.CloseToTray; NotifyCheck.IsChecked = vm.Settings.NotifyTrack; ExclusiveCheck.IsChecked = vm.Settings.Exclusive; ThemeBox.SelectedIndex = vm.Settings.Theme switch { "Light" => 1, "Dark" => 2, _ => 0 };
     }
     private void CloseClick(object sender, RoutedEventArgs e) => Close();
+    internal void SelectPage(int index) => SettingsTabs.SelectedIndex = index;
     private async void TestClick(object sender, RoutedEventArgs e) => await TestOrSave(false);
     private async void SaveClick(object sender, RoutedEventArgs e) => await TestOrSave(true);
     private async Task TestOrSave(bool save)

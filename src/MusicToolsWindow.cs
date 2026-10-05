@@ -9,9 +9,8 @@ internal sealed class MusicToolsWindow : DialogShell
 {
     private readonly PlayerViewModel _vm;
     private readonly System.Windows.Controls.TabControl _tabs = new();
-    private readonly ListBox _lyrics = new(), _playlistList = new(), _songs = new(), _downloads = new();
+    private readonly ListBox _playlistList = new(), _songs = new(), _downloads = new();
     private readonly TextBox _name = UiFactory.Input("新歌单"), _minutes = UiFactory.Input("30", 90);
-    private readonly ComboBox _language = new() { Height = 36, Width = 120, DisplayMemberPath = "Language" };
     private readonly TextBlock _message = UiFactory.Text("", 11);
     private readonly List<Track> _selection;
     private List<Track> _playlistTracks = [];
@@ -22,7 +21,7 @@ internal sealed class MusicToolsWindow : DialogShell
         _vm = vm; DataContext = vm; _selection = selection?.ToList() ?? [];
         Body.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) }); Body.RowDefinitions.Add(new() { Height = GridLength.Auto }); Body.Children.Add(_tabs); Grid.SetRow(_message, 1); Body.Children.Add(_message);
         AddTab("歌词", MakeLyrics()); AddTab("歌单", MakePlaylists()); AddTab("离线", MakeOffline()); AddTab("定时", MakeSleep()); SelectTab(tab);
-        vm.ActiveLyricChanged += OnActiveLyric; vm.PropertyChanged += OnVmChanged; vm.Queue.CollectionChanged += OnQueueChanged; Closed += (_, _) => { vm.ActiveLyricChanged -= OnActiveLyric; vm.PropertyChanged -= OnVmChanged; vm.Queue.CollectionChanged -= OnQueueChanged; };
+        vm.PropertyChanged += OnVmChanged; vm.Queue.CollectionChanged += OnQueueChanged; Closed += (_, _) => { vm.PropertyChanged -= OnVmChanged; vm.Queue.CollectionChanged -= OnQueueChanged; };
         Loaded += (_, _) => Execute(RefreshPlaylistsAsync);
     }
     public void SelectTab(string name) { _tabs.SelectedItem = _tabs.Items.Cast<TabItem>().FirstOrDefault(t => (string)t.Header == name) ?? _tabs.Items[0]; }
@@ -34,18 +33,11 @@ internal sealed class MusicToolsWindow : DialogShell
     private UIElement MakeLyrics()
     {
         var grid = new Grid { Margin = new Thickness(12) }; grid.RowDefinitions.Add(new() { Height = GridLength.Auto }); grid.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) }); grid.RowDefinitions.Add(new() { Height = GridLength.Auto });
-        var header = new DockPanel(); _language.ItemsSource = _vm.LyricDocuments; _language.SelectedIndex = 0; _language.Visibility = _vm.LyricDocuments.Count > 1 ? Visibility.Visible : Visibility.Collapsed; _language.SelectionChanged += (_, _) => _vm.SetLyricDocument(_language.SelectedIndex);
-        DockPanel.SetDock(_language, Dock.Right); header.Children.Add(_language); var status = UiFactory.Text("", 11); status.SetBinding(TextBlock.TextProperty, new Binding("LyricsStatus")); header.Children.Add(status); grid.Children.Add(header);
-        _lyrics.ItemsSource = _vm.LyricLines; _lyrics.BorderThickness = new Thickness(0); _lyrics.ItemTemplate = LyricTemplate(); _lyrics.MouseDoubleClick += (_, _) => { if (_lyrics.SelectedItem is LyricLine { Time: double time }) _vm.Seek(Math.Max(0, time - _vm.LyricOffset)); }; var lyricsBody = UiFactory.ListWithEmptyState(_lyrics, "暂无歌词", "播放歌曲后加载歌词，也可导入本地 LRC 文件。"); Grid.SetRow(lyricsBody, 1); grid.Children.Add(lyricsBody);
-        var footer = new StackPanel(); footer.Children.Add(UiFactory.Buttons(UiFactory.Button("桌面歌词", () => ((App)Application.Current).ToggleDesktopLyrics()), UiFactory.Button("导入 LRC", ImportLyrics), UiFactory.Button("提前 0.25 秒", () => _vm.LyricOffset += .25), UiFactory.Button("延后 0.25 秒", () => _vm.LyricOffset -= .25), UiFactory.Button("重置偏移", () => _vm.LyricOffset = 0)));
-        var offset = UiFactory.Text("", 10); offset.SetBinding(TextBlock.TextProperty, new Binding("LyricOffset") { StringFormat = "歌词偏移：{0:+0.00;-0.00;0.00} 秒" }); footer.Children.Add(offset); Grid.SetRow(footer, 2); grid.Children.Add(footer); return grid;
+        var header = new DockPanel { Margin = new Thickness(0, 0, 0, 8) }; var art = new System.Windows.Controls.Image { Width = 48, Height = 48, Margin = new Thickness(0, 0, 12, 0) }; art.SetBinding(System.Windows.Controls.Image.SourceProperty, new Binding("Cover")); header.Children.Add(art);
+        var names = new StackPanel { VerticalAlignment = VerticalAlignment.Center }; var title = UiFactory.Text("", 17); title.FontWeight = FontWeights.SemiBold; title.SetBinding(TextBlock.TextProperty, new Binding("Title")); names.Children.Add(title); var artist = UiFactory.Text("", 11); artist.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); artist.SetBinding(TextBlock.TextProperty, new Binding("Artist")); names.Children.Add(artist); header.Children.Add(names); grid.Children.Add(header);
+        var lyrics = new LyricsView(_vm); Grid.SetRow(lyrics, 1); grid.Children.Add(lyrics);
+        var footer = new StackPanel { Margin = new Thickness(0, 8, 0, 0) }; footer.Children.Add(new LyricsToolbar(_vm, true) { HorizontalAlignment = HorizontalAlignment.Right }); var status = UiFactory.Text("", 10); status.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); status.SetBinding(TextBlock.TextProperty, new Binding("LyricsStatus")); footer.Children.Add(status); Grid.SetRow(footer, 2); grid.Children.Add(footer); return grid;
     }
-    private static DataTemplate LyricTemplate()
-    {
-        var text = new FrameworkElementFactory(typeof(TextBlock), "LyricText"); text.SetBinding(TextBlock.TextProperty, new Binding("Text")); text.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap); text.SetValue(TextBlock.FontSizeProperty, 18d); text.SetValue(FrameworkElement.MarginProperty, new Thickness(8, 10, 8, 10)); text.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
-        var template = new DataTemplate { VisualTree = text }; var trigger = new DataTrigger { Binding = new Binding("IsActive"), Value = true }; trigger.Setters.Add(new Setter(TextBlock.ForegroundProperty, new DynamicResourceExtension("AccentBrush"), "LyricText")); trigger.Setters.Add(new Setter(TextBlock.FontWeightProperty, FontWeights.SemiBold, "LyricText")); template.Triggers.Add(trigger); return template;
-    }
-    private void ImportLyrics() { var picker = new Microsoft.Win32.OpenFileDialog { Title = "打开歌词", Filter = "歌词文件|*.lrc;*.txt" }; if (picker.ShowDialog(this) == true) Execute(() => _vm.ImportLyricsAsync(picker.FileName)); }
     private UIElement MakePlaylists()
     {
         var grid = new Grid { Margin = new Thickness(12) }; grid.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star), MinWidth = 140, MaxWidth = 200 }); grid.ColumnDefinitions.Add(new() { Width = new GridLength(2.6, GridUnitType.Star) });
@@ -58,7 +50,7 @@ internal sealed class MusicToolsWindow : DialogShell
     private async Task RefreshPlaylistsAsync()
     {
         string? selected = (_playlistList.SelectedItem as LibraryItem)?.Id; var list = _vm.Playlists.Local.Select(p => new LibraryItem(p.Id, p.Name, "本地歌单", "local-playlist")).ToList();
-        if (_vm.Api.Configured) try { var root = await _vm.Api.CallAsync("getPlaylists"); if (root.TryGetProperty("playlists", out var playlists) && playlists.TryGetProperty("playlist", out var rows)) foreach (var row in rows.EnumerateArray()) list.Add(new(NavidromeApiClient.Text(row, "id"), NavidromeApiClient.Text(row, "name"), "服务器歌单", "playlist")); } catch (ApiException e) { _message.Text = e.Message; }
+        if (_vm.Api.Configured) try { var root = await _vm.Api.CallAsync("getPlaylists"); if (root.TryGetProperty("playlists", out var playlists) && playlists.TryGetProperty("playlist", out var rows)) foreach (var row in rows.EnumerateArray()) list.Add(new(NavidromeApiClient.Text(row, "id"), NavidromeApiClient.Text(row, "name"), _vm.Api.SourceName + "歌单", "playlist")); } catch (ApiException e) { _message.Text = e.Message; }
         _playlistList.ItemsSource = list; _playlistList.SelectedItem = list.FirstOrDefault(p => p.Id == selected) ?? list.FirstOrDefault();
     }
     private async Task LoadPlaylistAsync()
@@ -95,7 +87,7 @@ internal sealed class MusicToolsWindow : DialogShell
     }
     private UIElement MakeOffline()
     {
-        var panel = new DockPanel { Margin = new Thickness(12) }; var top = new StackPanel(); var size = UiFactory.Text("", 14); size.FontWeight = FontWeights.Medium; size.SetBinding(TextBlock.TextProperty, new Binding("OfflineSize") { StringFormat = "缓存容量：{0}" }); top.Children.Add(size); var progress = UiFactory.Text("", 11); progress.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); progress.SetBinding(TextBlock.TextProperty, new Binding("DownloadStatus")); top.Children.Add(progress); top.Children.Add(UiFactory.Buttons(ActionButton("下载当前歌曲", () => Execute(() => _vm.Offline.DownloadAsync(_vm.Current is Track track ? [track] : [])), () => !_vm.IsDownloading && _vm.Current is { IsLocal: false }, true), ActionButton("下载播放队列", () => Execute(() => _vm.Offline.DownloadAsync(_vm.Queue.ToArray())), () => !_vm.IsDownloading && _vm.Queue.Any(t => !t.IsLocal)), ActionButton("取消下载", _vm.Offline.Cancel, () => _vm.IsDownloading), ActionButton("清空缓存", () => Execute(_vm.Offline.ClearAsync), () => !_vm.IsDownloading && _vm.Offline.Bytes > 0))); DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top);
+        var panel = new DockPanel { Margin = new Thickness(12) }; var top = new StackPanel(); var size = UiFactory.Text("", 14); size.FontWeight = FontWeights.Medium; size.SetBinding(TextBlock.TextProperty, new Binding("OfflineSize") { StringFormat = "缓存容量：{0}" }); top.Children.Add(size); var progress = UiFactory.Text("", 11); progress.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); progress.SetBinding(TextBlock.TextProperty, new Binding("DownloadStatus")); top.Children.Add(progress); top.Children.Add(UiFactory.Buttons(ActionButton("下载当前歌曲", () => Execute(() => _vm.Offline.DownloadAsync(_vm.Current is Track track ? [track] : [])), () => !_vm.IsDownloading && _vm.Current is { IsLocal: false, IsNetease: false }, true), ActionButton("下载播放队列", () => Execute(() => _vm.Offline.DownloadAsync(_vm.Queue.Where(t => !t.IsNetease).ToArray())), () => !_vm.IsDownloading && _vm.Queue.Any(t => !t.IsLocal && !t.IsNetease)), ActionButton("取消下载", _vm.Offline.Cancel, () => _vm.IsDownloading), ActionButton("清空缓存", () => Execute(_vm.Offline.ClearAsync), () => !_vm.IsDownloading && _vm.Offline.Bytes > 0))); DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top);
         var play = ActionButton("播放选中歌曲", () => Execute(async () => { if (_downloads.SelectedItem is OfflineEntry entry) { _vm.Queue.Add(entry.Track); await _vm.PlayAsync(_vm.Queue.Count - 1); } }), () => _downloads.SelectedItem != null); play.HorizontalAlignment = HorizontalAlignment.Left; DockPanel.SetDock(play, Dock.Bottom); panel.Children.Add(play); var presenter = new FrameworkElementFactory(typeof(ContentPresenter)); presenter.SetBinding(ContentPresenter.ContentProperty, new Binding("Track")); presenter.SetValue(ContentPresenter.ContentTemplateProperty, Application.Current.Resources["TrackTemplate"]); _downloads.ItemTemplate = new DataTemplate { VisualTree = presenter }; _downloads.SelectionChanged += (_, _) => UpdateActions(); _downloads.SetBinding(ItemsControl.ItemsSourceProperty, new Binding("OfflineEntries")); panel.Children.Add(UiFactory.ListWithEmptyState(_downloads, "尚无离线歌曲", "下载歌曲或专辑后，即可在断网时播放。")); return panel;
     }
     private UIElement MakeSleep()
@@ -104,6 +96,5 @@ internal sealed class MusicToolsWindow : DialogShell
         panel.Children.Add(UiFactory.Buttons(UiFactory.Button("开始计时", () => Execute(() => { if (!int.TryParse(_minutes.Text, out var minutes) || minutes is < 1 or > 720) throw new ApiException("请输入 1–720 分钟。"); _vm.SetSleep(minutes, finish.IsChecked == true); return Task.CompletedTask; }), true), UiFactory.Button("播完当前歌曲停止", () => Execute(() => { _vm.SetSleep(0, true); return Task.CompletedTask; })), UiFactory.Button("取消定时", _vm.CancelSleep)));
         var status = UiFactory.Text("", 14); status.SetBinding(TextBlock.TextProperty, new Binding("SleepStatus")); panel.Children.Add(status); return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
     }
-    private void OnActiveLyric(LyricLine? line) { if (line != null && IsVisible && _tabs.SelectedIndex == 0) _lyrics.ScrollIntoView(line); }
-    private void OnVmChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == nameof(_vm.LyricDocuments)) { _language.ItemsSource = _vm.LyricDocuments; _language.SelectedIndex = 0; _language.Visibility = _vm.LyricDocuments.Count > 1 ? Visibility.Visible : Visibility.Collapsed; } if (e.PropertyName is nameof(_vm.Current) or nameof(_vm.IsDownloading) or nameof(_vm.OfflineEntries)) UpdateActions(); }
+    private void OnVmChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName is nameof(_vm.Current) or nameof(_vm.IsDownloading) or nameof(_vm.OfflineEntries)) UpdateActions(); }
 }

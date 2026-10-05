@@ -9,7 +9,7 @@ public sealed class CoverCacheService(NavidromeApiClient api)
     private DateTime _lastTrim = DateTime.MinValue;
     private readonly object _trimLock = new();
     private int _decodeGeneration;
-    private string Key(string id) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(api.CacheScope + "\0" + id)));
+    private string Key(string id) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(api.ScopeForId(id) + "\0" + id)));
     public async Task<string?> GetPathAsync(string? id, int limitMb, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(id)) return null; await _gate.WaitAsync(ct);

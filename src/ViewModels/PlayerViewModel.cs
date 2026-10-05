@@ -16,7 +16,10 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     public event PropertyChangedEventHandler? PropertyChanged;
     public void Changed([CallerMemberName] string? name = null) { PropertyChanged?.Invoke(this, new(name)); if (name == nameof(PlayGlyph)) PropertyChanged?.Invoke(this, new(nameof(PlayIcon))); if (name == nameof(Position)) PropertyChanged?.Invoke(this, new(nameof(PositionText))); if (name == nameof(Duration)) PropertyChanged?.Invoke(this, new(nameof(DurationText))); }
     public AppSettings Settings { get; }
-    public NavidromeApiClient Api { get; }
+    public MusicApiClient Api { get; }
+    public string CatalogSource { get => Settings.CatalogSource; set { value = value == "netease" ? "netease" : "navidrome"; if (value == Settings.CatalogSource) return; Settings.CatalogSource = value; SaveSettings(); Changed(); Changed(nameof(IsNeteaseCatalog)); Changed(nameof(ServerConfigured)); Changed(nameof(CatalogName)); _beforeSearch = null; Run(() => BrowseAsync("最近添加")); } }
+    public bool IsNeteaseCatalog => Api.UsingNetease;
+    public string CatalogName => Api.SourceName;
     public bool ServerConfigured => Api.Configured;
     public MpvPlayerService Player { get; }
     public CoverCacheService Covers { get; }
@@ -42,7 +45,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     public string Navigation { get => _navigation; private set { _navigation = value; Changed(); } }
     private string _quality = "尚未播放";
     public string Quality { get => _quality; set { _quality = value; Changed(); Changed(nameof(QualityTag)); } }
-    public string QualityTag => Quality.StartsWith("Direct Play") ? "Direct Play" : Quality == "服务端转码" ? "转码播放" : Quality == "本地播放" ? "本地播放" : Quality == "播放中" ? "播放中" : "未播放";
+    public string QualityTag => Quality == "网易云试听" ? "试听" : Quality == "网易云播放" ? "网易云" : Quality.StartsWith("Direct Play") ? "Direct Play" : Quality == "服务端转码" ? "转码播放" : Quality == "手机播放" ? "手机播放" : Quality == "本地播放" ? "本地播放" : Quality == "播放中" ? "播放中" : "未播放";
     private string _audioInfo = "";
     public string AudioInfo { get => _audioInfo; set { _audioInfo = value; Changed(); Changed(nameof(AudioFields)); } }
     public IReadOnlyList<AudioField> AudioFields => AudioInfo.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => { int split = line.IndexOf('：'); return new AudioField(split > 0 ? line[..split] : line, split > 0 ? line[(split + 1)..] : ""); }).ToArray();
@@ -53,8 +56,8 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     public string PositionText => Clock(Position);
     public string DurationText => Clock(Duration);
     private static string Clock(double n) => TimeSpan.FromSeconds(Math.Max(0, n)).ToString(n >= 3600 ? @"h\:mm\:ss" : @"m\:ss");
-    public string PlayGlyph => Player.IsIdle || Player.IsPaused ? "▶" : "Ⅱ";
-    public string PlayIcon => Player.IsIdle || Player.IsPaused ? "\uE768" : "\uE769";
+    public string PlayGlyph => MobileOutput ? MobilePlaying ? "Ⅱ" : "▶" : Player.IsIdle || Player.IsPaused ? "▶" : "Ⅱ";
+    public string PlayIcon => PlayGlyph == "▶" ? "\uE768" : "\uE769";
     public string ModeIcon => Settings.Mode switch { PlayMode.Shuffle => "\uE8B1", PlayMode.RepeatOne => "\uE8ED", PlayMode.RepeatAll => "\uE8EE", _ => "\uE72A" };
     public string ModeText => Settings.Mode switch { PlayMode.RepeatAll => "列表循环", PlayMode.RepeatOne => "单曲循环", PlayMode.Shuffle => "随机播放", _ => "顺序播放" };
     public double Volume { get => Settings.Volume; set { Settings.Volume = Math.Clamp(value, 0, 100); Player.Volume = Settings.Volume; Changed(); SaveSettingsSoon(); } }
@@ -80,6 +83,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     {
         Settings = settings; Password = password; Api = new(settings, password); Player = new(settings); Covers = new(Api);
         LocalLibrary = new(settings); Lyrics = new(Api); Offline = new(Api, settings); Playlists = new();
+        Api.Netease.AccountChanged += OnNeteaseAccountChanged;
         Offline.CacheExtrasAsync = async (track, ct) => { await Covers.GetPathAsync(track.CoverArt, Settings.CoverCacheMb, ct); await Lyrics.LoadAsync(track, ct); };
         var saved = Store.Read("queue.json", new QueueState()); foreach (var track in saved.Tracks) Queue.Add(track);
         Index = saved.Index >= 0 && saved.Index < Queue.Count ? saved.Index : -1; _restorePosition = saved.Position;
@@ -110,7 +114,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         Player.Ended += code => { int generation = _generation; _dispatcher.BeginInvoke(() => { if (_disposed || generation != _generation) return; if (code == 0) { if (_stopAfterCurrent) { CancelSleep(); Stop(); } else if (_preparedIndex < 0) Run(() => NextAsync(true)); } else Run(RecoverDeviceOrNetworkAsync); }); };
         _sleepTimer.Interval = TimeSpan.FromSeconds(1); _sleepTimer.Tick += SleepTick;
     }
-    public async Task ConnectAsync() { Status = "正在连接 Navidrome…"; var version = await Api.PingAsync(); Status = $"已连接 · {version}"; Store.Log("INFO", "Navidrome 连接成功"); }
+    public async Task ConnectAsync() { Status = $"正在连接 {Api.SourceName}…"; var version = await Api.PingAsync(); Status = $"已连接 · {version}"; Store.Log("INFO", $"{Api.SourceName} 连接成功"); }
     public void Run(Func<Task> action) => _ = Guard(action);
     private async Task Guard(Func<Task> action)
     {
@@ -140,11 +144,12 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         CancelPrepared(); _order.Record(index);
         _playCts.Cancel(); _playCts.Dispose(); _playCts = new(); var ct = _playCts.Token; var generation = ++_generation;
         Player.Stop(); _timer.Stop(); _loaded = false; _reconnecting = false; _recoveryLoad = false; Index = index; Position = 0; Duration = Current!.Duration; Changed(nameof(Duration));
-        _listened = 0; _submitted = false; Cover = null; _coverPath = null; Quality = "正在加载"; AudioInfo = ""; _responseType = null; ClearLyrics(); RefreshTrack(); SaveQueue();
+        _listened = 0; _submitted = false; _mobileHistoryStarted = false; Cover = null; _coverPath = null; Quality = "正在加载"; AudioInfo = ""; _responseType = null; ClearLyrics(); RefreshTrack(); SaveQueue();
         var track = Current; Status = $"正在加载 · {track.Title}";
         Offline.ProtectedPath = null;
+        if (MobileOutput) { SeekRevision++; Position = resume ? _restorePosition : 0; _restorePosition = 0; MobilePlaying = true; Quality = "手机播放"; Status = "正在手机播放"; RefreshTrack(); SaveQueue(); _ = LoadExtrasAsync(track, generation, ct); return; }
         if (track.IsLocal) { if (!File.Exists(track.LocalPath)) throw new ApiException("找不到音乐文件，请重新打开。"); Player.Load(track.LocalPath!, resume ? _restorePosition : 0); }
-        else { string? cached = Offline.GetPath(track); if (cached == null && !Api.Configured) throw new ApiException("请先在设置中连接 Navidrome。"); Offline.ProtectedPath = cached; Player.Load(cached ?? Api.Url("stream", ("id", track.Id)), resume ? _restorePosition : 0); }
+        else { string? cached = Offline.GetPath(track); if (cached == null && !track.IsNetease && !Api.NavidromeConfigured) throw new ApiException("请先在设置中连接 Navidrome。"); Offline.ProtectedPath = cached; var url = cached ?? await Api.StreamUrlAsync(track, ct); if (generation != _generation || ct.IsCancellationRequested) return; Player.Load(url, resume ? _restorePosition : 0); }
         _restorePosition = 0;
         _ = LoadExtrasAsync(track, generation, ct);
         await Task.CompletedTask;
@@ -161,14 +166,14 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         catch (OperationCanceledException) { }
         catch (Exception e) { Store.Log("WARNING", $"封面或媒体信息更新失败 {e.GetType().Name}"); }
         Run(() => LoadLyricsAsync(track, generation, ct));
-        if (track.IsLocal || Offline.GetPath(track) != null) return;
+        if (track.IsLocal || track.IsNetease || Offline.GetPath(track) != null) return;
         try { var type = await Api.ProbeTypeAsync(track.Id, ct); if (generation == _generation && !ct.IsCancellationRequested) { _responseType = type; UpdateAudioInfo(); } }
         catch (OperationCanceledException) { }
         catch (Exception e) { Store.Log("WARNING", $"响应格式检查失败 {e.GetType().Name}"); }
     }
     private async Task OnLoadedAsync()
     {
-        if (_disposed) return;
+        if (_disposed || MobileOutput) return;
         if (_preparedIndex >= 0 && Player.Get("playlist-pos") == "1")
         {
             int next = _preparedIndex; _preparedIndex = -1; _playCts.Cancel(); _playCts.Dispose(); _playCts = new(); _generation++; Index = next; _order.Next(_order.History.Count > 0 ? _order.History[_order.Cursor] : -1, Settings.Mode, true); _order.Record(next);
@@ -177,7 +182,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         }
         if (_disposed || Current == null) return; _loaded = true; _reconnecting = false; _lastTick = Stopwatch.GetTimestamp(); _timer.Start();
         if (Current.IsLocal) { foreach (var field in new[] { "title", "artist", "album" }) { var value = Player.Get("metadata/by-key/" + field); if (!string.IsNullOrWhiteSpace(value)) { if (field == "title") Current.Title = value; else if (field == "artist") Current.Artist = value; else Current.Album = value; } } Current.NotifyMetadata(); RefreshTrack(); SaveLocalLibrary(); }
-        Status = "正在播放"; Duration = Player.Duration > 0 ? Player.Duration : Current.Duration; if (Current.IsLocal) { Current.Duration = Duration; Current.NotifyMetadata(); SaveLocalLibrary(); }
+        Status = Current.Preview ? "正在试听 · 完整播放需要相应权益" : "正在播放"; if (Current.IsNetease) Api.Netease.RecordRecent(Current); Duration = Player.Duration > 0 ? Player.Duration : Current.Duration; if (Current.IsLocal) { Current.Duration = Duration; Current.NotifyMetadata(); SaveLocalLibrary(); }
         Changed(nameof(Duration)); Changed(nameof(PlayGlyph)); UpdateAudioInfo();
         PrepareNext();
         Media?.Status(false, false);
@@ -187,11 +192,11 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     private static string Normalize(string v) => v.ToLowerInvariant() switch { "ape" or "monkey's audio" => "ape", "aac" or "m4a" => "aac", "alac" => "alac", "mp3" or "mp2" => "mp3", "pcm_s16le" or "pcm_s24le" or "pcm_f32le" or "wav" => "pcm", "vorbis" or "ogg" => "vorbis", _ => v.ToLowerInvariant() };
     private void UpdateAudioInfo()
     {
-        if (Current == null) return; var codec = Player.Get("audio-codec-name"); var expected = Normalize(Current.Suffix ?? ""); var actual = Normalize(codec);
+        if (Current == null) return; if (MobileOutput) { Quality = "手机播放"; return; } var codec = Player.Get("audio-codec-name"); var expected = Normalize(Current.Suffix ?? ""); var actual = Normalize(codec);
         bool containerAmbiguous = expected is "aac" or "vorbis" or "dsf" or "dff";
         bool mismatch = codec.Length > 0 && !containerAmbiguous && expected.Length > 0 && actual != expected;
         bool httpMismatch = _responseType != null && Current.ContentType != null && !string.Equals(_responseType, Current.ContentType, StringComparison.OrdinalIgnoreCase) && !(_responseType == "application/octet-stream");
-        Quality = Current.IsLocal ? "本地播放" : mismatch || httpMismatch ? "服务端转码" : codec.Length > 0 && expected.Length > 0 && !containerAmbiguous && actual == expected ? "Direct Play" : "播放中";
+        Quality = Current.IsNetease ? Current.Preview ? "网易云试听" : "网易云播放" : Current.IsLocal ? "本地播放" : mismatch || httpMismatch ? "服务端转码" : codec.Length > 0 && expected.Length > 0 && !containerAmbiguous && actual == expected ? "Direct Play" : "播放中";
         var rate = Player.Get("audio-params/samplerate"); var sampleFormat = Player.Get("audio-params/format"); var channels = Player.Get("audio-params/channel-count");
         static string Value(int n, string unit) => n > 0 ? $"{n} {unit}" : "—";
         AudioInfo = $"格式：{Current.Format}\n采样率：{(Current.SamplingRate > 0 ? Value(Current.SamplingRate, "Hz") : rate.Length > 0 ? rate + " Hz" : "—")}\n位深：{Value(Current.BitDepth, "bit")}\n声道：{(Current.ChannelCount > 0 ? Current.ChannelCount.ToString() : channels.Length > 0 ? channels : "—")}\n码率：{Value(Current.BitRate, "kbps")}\n播放：{Quality}\n解码：{(codec.Length > 0 ? codec.ToUpperInvariant() : "—")}\n输出：WASAPI{(Settings.Exclusive ? " 独占" : " 共享")}";
@@ -210,13 +215,15 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     }
     public async Task ToggleAsync()
     {
+        if (MobileOutput) { if (Current == null) { if (Queue.Count > 0) await PlayAsync(0); else await RandomAsync(false); } else { MobilePlaying = !MobilePlaying; Changed(nameof(PlayGlyph)); } return; }
         if (Player.IsIdle) { if (Current != null) await PlayAsync(Index, true); else if (Queue.Count > 0) await PlayAsync(0); else await RandomAsync(false); }
         else if (Player.IsPaused) Player.Resume(); else Player.Pause(); Changed(nameof(PlayGlyph)); Media?.Status(Player.IsIdle, Player.IsPaused);
     }
-    public void Stop() { CancelPrepared(); _playCts.Cancel(); _loaded = false; _reconnecting = false; _timer.Stop(); Player.Stop(); Position = 0; _restorePosition = 0; Offline.ProtectedPath = null; Changed(nameof(PlayGlyph)); Media?.Status(true, false); Status = "已停止"; SaveQueue(); }
-    public void Seek(double position) { if (!Player.IsIdle) { Player.Seek(position); Position = position; SaveQueue(); } }
+    public void Stop() { if (MobileOutput) SeekRevision++; MobilePlaying = false; CancelPrepared(); _playCts.Cancel(); _loaded = false; _reconnecting = false; _timer.Stop(); Player.Stop(); Position = 0; _restorePosition = 0; Offline.ProtectedPath = null; Changed(nameof(PlayGlyph)); Media?.Status(true, false); Status = "已停止"; SaveQueue(); }
+    public void Seek(double position) { SeekRevision++; if (MobileOutput) { Position = Math.Clamp(position, 0, Duration); SaveQueue(); } else if (!Player.IsIdle) { Player.Seek(position); Position = position; SaveQueue(); } }
     public async Task NextAsync(bool automatic)
     {
+        if (automatic && _stopAfterCurrent) { CancelSleep(); Stop(); return; }
         if (Queue.Count == 0) { Stop(); return; }
         int next = _order.Next(Index, Settings.Mode, automatic);
         if (next < 0) { Stop(); Status = "队列播放完毕"; return; }
@@ -228,7 +235,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     public async Task ToggleFavoriteAsync()
     {
         var track = Current; if (track == null) return; bool star = track.Starred == null; if (!track.IsLocal) await Api.StarAsync(track.Id, star);
-        foreach (var t in Queue.Concat(Results).Concat(_localTracks).Where(t => t.Id == track.Id)) t.Starred = star ? DateTime.UtcNow.ToString("O") : null;
+        foreach (var t in Queue.Concat(Results).Concat(_localTracks).Where(t => t.Id == track.Id)) { t.Starred = star ? DateTime.UtcNow.ToString("O") : null; t.NotifyMetadata(); }
         Changed(nameof(FavoriteGlyph)); SaveQueue(); if (track.IsLocal) SaveLocalLibrary(); Status = star ? "已收藏" : "已取消收藏";
     }
     public async Task RandomAsync(bool favorites)
@@ -258,7 +265,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
             while (!ct.IsCancellationRequested)
             {
                 int delay = delays[Math.Min(attempt++, delays.Length - 1)]; Status = $"网络或音频流中断 · {delay} 秒后重连"; await Task.Delay(TimeSpan.FromSeconds(delay), ct);
-                try { await Api.PingAsync(ct); if (generation != _generation) return; _recoveryLoad = true; Player.Load(Api.Url("stream", ("id", Current.Id)), start); if (paused) Player.Pause(); Status = "正在重新加载音频流…"; return; }
+                try { var recoveredUrl = await Api.StreamUrlAsync(Current, ct); if (generation != _generation) return; _recoveryLoad = true; Player.Load(recoveredUrl, start); if (paused) Player.Pause(); Status = "正在重新加载音频流…"; return; }
                 catch (ApiException) { Store.Log("WARNING", "网络重连失败"); }
             }
         }

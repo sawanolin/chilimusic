@@ -77,6 +77,39 @@ public static class UiVerification
         foreach (string mode in new[] { "Light", "Dark" }) { Theme.Apply(mode); main.Activate(); await Task.Delay(300); Capture(main, Path.Combine(Store.Root, $"local-{mode.ToLowerInvariant()}.png")); WindowAppearance.Capture(main, Path.Combine(Store.Root, $"local-native-{mode.ToLowerInvariant()}.png")); }
         vm.SaveQueue(); results["PersistedLocalQueue"] = Store.Read("queue.json", new QueueState()).Tracks.All(t => t.IsLocal); results["ServerConfigured"] = vm.Api.Configured; Store.Write("local-test.json", results); Theme.Apply(vm.Settings.Theme);
     }
+    internal static async Task RunQualityAsync(App app)
+    {
+        FeatureVerification.RequireIsolatedProfile(); var report = new List<object>();
+        try
+        {
+            app.ShowMain(); var main = Application.Current.Windows.OfType<MainWindow>().First(); app.Vm.Quality = "Direct Play";
+            var badge = (System.Windows.Controls.Border)main.FindName("QualityBadge");
+            var utilities = (System.Windows.Controls.Grid)main.FindName("PlaybackUtilities");
+            var footer = (System.Windows.Controls.Grid)VisualTreeHelper.GetParent(utilities);
+            await Task.Delay(300);
+            foreach (var theme in ThemeCatalog.All)
+            foreach (var size in new[] { (900d, 610d), (1040d, 720d) })
+            {
+                Theme.Apply(theme.Id); main.Width = size.Item1; main.Height = size.Item2; await Task.Delay(50); main.UpdateLayout();
+                var area = utilities.TransformToAncestor(footer).TransformBounds(new Rect(utilities.RenderSize));
+                var bounds = badge.TransformToAncestor(footer).TransformBounds(new Rect(badge.RenderSize));
+                if (area.Top < 0 || area.Bottom > footer.ActualHeight || bounds.Top < 1 || bounds.Bottom > footer.ActualHeight - 1) throw new InvalidOperationException("Quality badge clipped: " + theme.Id);
+                var label = (System.Windows.Controls.TextBlock)badge.Child;
+                var text = new FormattedText(label.Text, System.Globalization.CultureInfo.CurrentCulture, System.Windows.FlowDirection.LeftToRight, new Typeface(label.FontFamily, label.FontStyle, label.FontWeight, label.FontStretch), label.FontSize, Brushes.Black, VisualTreeHelper.GetDpi(label).PixelsPerDip);
+                if (label.ActualWidth + .1 < text.Width) throw new InvalidOperationException($"Quality label width clipped {label.Text}: {label.ActualWidth} < {text.Width}");
+                if (label.ActualHeight + .1 < text.Height) throw new InvalidOperationException("Quality label clipped");
+                foreach (double scale in new[] { 1d, 1.25d, 1.5d, 2d })
+                {
+                    var bitmap = new RenderTargetBitmap((int)Math.Ceiling(main.ActualWidth * scale), (int)Math.Ceiling(main.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32); bitmap.Render(main);
+                    var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); using var file = File.Create(Path.Combine(Store.Root, $"quality-{theme.Id}-{size.Item1}-{scale}.png")); encoder.Save(file);
+                }
+                report.Add(new { theme.Id, Width = main.Width, BadgeWidth = badge.ActualWidth, Top = bounds.Top, Bottom = bounds.Bottom, Available = footer.ActualHeight, Text = label.Text, LabelWidth = label.ActualWidth, RequiredWidth = text.Width });
+            }
+            Store.Write("quality-verification.json", new { Result = "PASS", Cases = report.Count, RenderScales = new[] { 1, 1.25, 1.5, 2 }, Layout = report });
+        }
+        catch (Exception error) { Store.Write("quality-verification.json", new { Result = "FAIL", Error = error.Message }); }
+        finally { app.Exit(); }
+    }
     private static T? Find<T>(DependencyObject root) where T : DependencyObject => FindAll<T>(root).FirstOrDefault();
     internal static IEnumerable<T> FindAll<T>(DependencyObject root) where T : DependencyObject { for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) { var child = VisualTreeHelper.GetChild(root, i); if (child is T t) yield return t; foreach (var nested in FindAll<T>(child)) yield return nested; } }
     internal static void Capture(FrameworkElement window, string path)

@@ -4,20 +4,29 @@ using System.Text;
 using System.Text.RegularExpressions;
 namespace ChiliMusic;
 
-public sealed class LyricLine(double? time, string text) : INotifyPropertyChanged
+public sealed class LyricLine(double? time, string text, string translation = "") : INotifyPropertyChanged
 {
     public double? Time { get; } = time;
     public string Text { get; } = text;
+    public string Translation { get; } = translation;
     private bool _active;
     public bool IsActive { get => _active; set { if (_active == value) return; _active = value; PropertyChanged?.Invoke(this, new(nameof(IsActive))); } }
     public event PropertyChangedEventHandler? PropertyChanged;
 }
-public sealed record LyricsDocument(string Language, List<LyricLine> Lines) { public override string ToString() => Language; }
+public sealed record LyricsDocument(string Language, List<LyricLine> Lines, string Source = "") { public override string ToString() => Language; }
 public sealed class LyricsService(NavidromeApiClient api)
 {
+    public string CachePath(Track track) => Path.Combine(Store.Root, "cache", "lyrics", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(api.ScopeForId(track.Id) + "\0" + track.Id))) + ".lrc");
+    public async Task<List<LyricsDocument>> ApplyMatchAsync(Track original, Track match, CancellationToken ct)
+    {
+        if (api is not MusicApiClient music || !music.Netease.LoggedIn) throw new ApiException("请先扫码登录网易云音乐。");
+        var documents = await music.Netease.LyricsAsync(match.Id, ct); if (!documents.Any(d => d.Lines.Any(l => !string.IsNullOrWhiteSpace(l.Text)))) throw new ApiException("这首歌曲没有可用歌词，请选择其他版本。");
+        documents = documents.Select(d => d with { Source = "网易云 · " + match.Artist + " · " + match.Title }).ToList(); Store.Write(CachePath(original) + ".match.json", documents); return documents;
+    }
     public async Task<List<LyricsDocument>> LoadAsync(Track track, CancellationToken ct)
     {
-        string custom = Path.Combine(Store.Root, "cache", "lyrics", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(api.CacheScope + "\0" + track.Id))) + ".lrc");
+        string custom = CachePath(track);
+        if (File.Exists(custom + ".match.json")) { var manual = Store.Read(custom + ".match.json", new List<LyricsDocument>()); if (manual.Count > 0) return manual; }
         if (File.Exists(custom)) return [Parse(await ReadTextAsync(custom, ct))];
         string cached = custom + ".json";
         if (File.Exists(cached)) { var saved = await Task.Run(() => Store.Read(cached, new List<LyricsDocument>()), ct); if (saved.Count > 0) return saved; }
@@ -25,8 +34,10 @@ public sealed class LyricsService(NavidromeApiClient api)
         {
             var lrc = Path.ChangeExtension(track.LocalPath!, ".lrc");
             if (File.Exists(lrc)) return [Parse(await ReadTextAsync(lrc, ct))];
-            return string.IsNullOrWhiteSpace(track.EmbeddedLyrics) ? [] : [Parse(track.EmbeddedLyrics)];
+            if (!string.IsNullOrWhiteSpace(track.EmbeddedLyrics)) return [Parse(track.EmbeddedLyrics)];
+            return await SupplementAsync(track, cached, ct);
         }
+        if (track.IsNetease && api is MusicApiClient music) { var documents = await music.Netease.LyricsAsync(track.Id, ct); if (documents.Count > 0) Store.Write(cached, documents); return documents; }
         try
         {
             var root = await api.CallAsync("getLyricsBySongId", ct, ("id", track.Id)); var documents = new List<LyricsDocument>();
@@ -40,7 +51,19 @@ public sealed class LyricsService(NavidromeApiClient api)
             if (documents.Count > 0) { Store.Write(cached, documents); return documents; }
         }
         catch (ApiException) { }
-        try { var root = await api.CallAsync("getLyrics", ct, ("artist", track.Artist), ("title", track.Title)); if (root.TryGetProperty("lyrics", out var lyric)) { string value = NavidromeApiClient.Text(lyric, "value"); if (value.Length > 0) { List<LyricsDocument> result = [Parse(value)]; Store.Write(cached, result); return result; } } } catch (ApiException) { }
+        try { var root = api is MusicApiClient catalogs ? await catalogs.CallSourceAsync("server", "getLyrics", ct, ("artist", track.Artist), ("title", track.Title)) : await api.CallAsync("getLyrics", ct, ("artist", track.Artist), ("title", track.Title)); if (root.TryGetProperty("lyrics", out var lyric)) { string value = NavidromeApiClient.Text(lyric, "value"); if (value.Length > 0) { List<LyricsDocument> result = [Parse(value)]; Store.Write(cached, result); return result; } } } catch (ApiException) { }
+        return await SupplementAsync(track, cached, ct);
+    }
+    private async Task<List<LyricsDocument>> SupplementAsync(Track track, string cached, CancellationToken ct)
+    {
+        if (api is not MusicApiClient music || !music.Settings.NeteaseLyrics || !music.Netease.LoggedIn) return [];
+        try
+        {
+            var match = await music.Netease.MatchLyricsAsync(track, ct); if (match == null) return [];
+            var docs = (await music.Netease.LyricsAsync(match.Id, ct)).Select(d => d with { Source = "网易云 · " + match.Artist + " · " + match.Title }).ToList();
+            if (docs.Any(d => d.Lines.Any(l => !string.IsNullOrWhiteSpace(l.Text)))) { Store.Write(cached, docs); return docs; }
+        }
+        catch (ApiException) { }
         return [];
     }
     public static LyricsDocument Parse(string text)

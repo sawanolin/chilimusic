@@ -1,6 +1,6 @@
 <UserControl x:Class="ChiliMusic.PlayerBar" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:pr="clr-namespace:System.Windows.Controls.Primitives;assembly=PresentationFramework">
- <StackPanel>
-  <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
+ <StackPanel x:Name="RootPanel">
+  <StackPanel x:Name="ControlRow" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,4">
    <Button Content="&#xE8B1;" Style="{StaticResource IconButton}" Command="{Binding ShuffleCommand}" ToolTip="开启 / 关闭随机播放" Foreground="{DynamicResource MutedBrush}"/>
    <Button Content="&#xE892;" Style="{StaticResource IconButton}" Command="{Binding PreviousCommand}" ToolTip="上一首" Margin="8,2"/>
    <Button Content="{Binding PlayIcon}" Style="{StaticResource CirclePlay}" Command="{Binding ToggleCommand}" ToolTip="播放 / 暂停"/>

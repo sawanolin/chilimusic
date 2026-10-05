@@ -1,6 +1,7 @@
 /.local/
 /qa/
 /dist/
+/release/
 /publish*/
 /tools/dotnet*/
 /tools/nuget/
@@ -20,4 +21,6 @@ local-library.json
 offline-cache.json
 playlists.json
 lyric-offsets.json
+netease-account.json
+netease-recent.json
 *.log

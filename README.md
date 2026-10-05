@@ -1,6 +1,6 @@
 # chilimusic
 
-chilimusic 是一款面向 Windows 的音乐播放器，支持本地音乐与 Navidrome 私人曲库。主界面用于浏览专辑和管理队列，任务栏控件与迷你播放器让你在工作时也能随手切歌。
+chilimusic 是一款面向 Windows 的音乐播放器，支持本地音乐、Navidrome 私人曲库与网易云音乐。主界面用于浏览专辑和管理队列，任务栏控件与迷你播放器让你在工作时也能随手切歌。连接同一局域网的手机还能控制电脑，或把声音切换到手机播放。
 
 [下载 Windows 版](https://github.com/sawanolin/chilimusic/releases/latest) · [更新记录](CHANGELOG.md) · [反馈问题](https://github.com/sawanolin/chilimusic/issues)
 
@@ -8,16 +8,19 @@ chilimusic 是一款面向 Windows 的音乐播放器，支持本地音乐与 Na
 
 - **任务栏播放控件**：嵌入任务栏，显示封面和歌曲，支持播放控制与模式切换；可调整宽度、隐藏封面 / 歌手，或显示在多个显示器的任务栏。
 - **Navidrome 曲库**：浏览专辑、歌手、歌单、最近添加与最近播放；分页加载和专辑排序让大曲库也便于浏览。
+- **网易云音乐**：扫码登录，浏览新碟、歌手、账号歌单、收藏、每日推荐和最近播放；支持电脑与手机播放，按账号权益选择音质。
+- **沉浸播放**：点击当前播放封面，展开大封面与居中同步歌词；支持长句换行、翻译、歌词匹配和播放控制。
 - **搜索与筛选**：搜索歌曲、专辑和歌手，按分类、歌手、专辑和格式筛选；清空搜索后返回原来的页面。
 - **本地音乐**：打开文件、拖入音乐或添加目录；读取标签、曲目与碟片序号、内嵌封面和歌词，自动扫描子目录、去重并跟踪文件变化。
 - **播放队列**：添加歌曲、安排下一首、拖动排序和移除歌曲，保存队列与播放位置。
 - **播放模式与历史**：顺序、列表循环、单曲循环和随机播放；随机播放一轮内不重复，“上一首”返回实际听过的歌曲，重启后保留顺序。
-- **歌词**：服务器歌词、本地 LRC 和内嵌歌词，同步滚动、定位和偏移调整；桌面歌词可单独开关与锁定。
+- **歌词**：服务器歌词、本地 LRC、内嵌歌词和网易云歌词；登录网易云后可自动补全缺失的本地 / Navidrome 歌词，也可手动选择版本。支持翻译、居中跟随、定位、偏移调整与桌面歌词。
 - **歌单**：新建和编辑本地 / 服务器歌单，添加、移除歌曲，导入 / 导出 M3U8。
-- **离线听歌**：下载歌曲、专辑或播放队列，查看进度、取消下载，设置缓存容量并清理缓存。
+- **离线听歌**：下载 Navidrome 歌曲、专辑或播放队列，查看进度、取消下载，设置缓存容量并清理缓存。
 - **音频输出**：libmpv、下一首预加载、WASAPI 输出设备选择与独占模式，支持按歌曲 / 专辑应用 ReplayGain。
 - **桌面与系统控制**：迷你播放器、系统托盘和 Windows 媒体控制；可配置的全局快捷键，默认 F7 播放、F8 暂停。
-- **定时与主题**：定时停止或播完当前歌曲停止；浅色、深色、跟随系统主题与封面强调色，支持开机启动、托盘启动和切歌通知。
+- **手机遥控与播放**：扫码配对，在手机网页浏览曲库、管理队列、切歌和调整音量；默认由电脑播放，可切换到手机并保留播放位置。
+- **定时与主题**：定时停止或播完当前歌曲停止；13 套浅色 / 深色配色、跟随系统和封面强调色，覆盖主界面、设置、音乐工具、迷你播放器与手机网页。
 
 ## 界面预览
 
@@ -35,13 +38,15 @@ chilimusic 是一款面向 Windows 的音乐播放器，支持本地音乐与 Na
 
 ## 下载与运行
 
-运行环境：Windows 10 / 11（x64），[.NET 8 Desktop Runtime（x64）](https://dotnet.microsoft.com/download/dotnet/8.0)。
+支持 Windows 10 2004 及以上 / Windows 11（x64）。
 
-1. 安装 .NET 8 Desktop Runtime，选择 **Windows · x64**。
-2. 从 [Releases](https://github.com/sawanolin/chilimusic/releases/latest) 下载 `chilimusic-1.1.1-win-x64.zip`。
-3. 解压到任意文件夹，运行 `chilimusic.exe`。保留解压后的同目录文件。
+1. 从 [Releases](https://github.com/sawanolin/chilimusic/releases/latest) 下载 `chilimusic-版本号-setup-x64.exe` 并运行。
+2. 安装向导会检查 **.NET 8 Desktop Runtime（x64）**。缺少时，点击“前往微软官网下载”，在微软页面选择 **.NET Desktop Runtime · Windows · x64**；安装完成后点击“重新检测”。
+3. 选择安装目录和快捷方式，完成后启动播放器。默认安装在当前用户的应用目录，无需管理员权限。
 
-下载页面同时提供 `SHA256SUMS.txt`，可用于校验压缩包。
+安装包不内置 .NET，也不安装 SDK。下载页面同时提供 `SHA256SUMS.txt`，可用于校验安装包。
+
+再次运行安装包即可更新播放器。卸载可在 Windows“已安装的应用”中进行；账号设置、歌单和本地曲库记录保留在当前用户的配置目录，原始音乐文件不会删除。
 
 ## 开始听音乐
 
@@ -62,6 +67,24 @@ chilimusic 是一款面向 Windows 的音乐播放器，支持本地音乐与 Na
 顶部搜索栏支持搜索歌曲、专辑和歌手；在“本地音乐”页面搜索时，会搜索已导入的本地文件。
 
 结果上方可切换分类和格式，点击“筛选”可输入歌手或专辑名称。点击搜索框右侧的“×”清空搜索。专辑列表滚动到底部会继续加载，也可点击“加载更多”；排序菜单提供专辑名、歌手名、最近添加与播放频次等顺序。
+
+### 登录网易云音乐
+
+1. 点击主界面左下角“网易云账号”，使用网易云官方手机 App 扫码并确认登录。
+2. 在左侧音乐来源中选择“网易云音乐”，浏览新碟、歌手、歌单、收藏、每日推荐和最近播放。
+3. 在账号窗口选择播放音质；歌曲可用音质和完整播放取决于账号权益与版权，试听歌曲会显示“试听”。
+
+登录保存在当前 Windows 用户的加密账户文件中，每台电脑单独扫码。移除本机账号只清除当前播放器的登录信息。网易云歌曲暂不支持离线下载，可使用官方客户端下载。
+
+手机网页的曲库来源也可选择“网易云音乐”，切换最近播放、收藏和每日推荐；播放页点击封面或“歌词”查看同步歌词。网易云账号最近播放由服务端读取，跨端更新可能存在延迟。
+
+### 沉浸播放与歌词匹配
+
+点击主界面底部或迷你播放器中的当前歌曲封面，进入沉浸播放页。左侧显示大封面，右侧歌词随播放居中滚动，底部保留播放控制。点击右上角收起按钮或按 Esc 返回曲库。
+
+已有的本地 LRC、内嵌歌词与服务器歌词优先使用。登录网易云后，缺少歌词的歌曲会按歌名、歌手与时长自动匹配；现场、伴奏等不同版本不会自动混用。未能明确匹配时，点击“匹配歌词”搜索并选择正确版本。账号窗口可关闭自动补全。
+
+歌词窗口、沉浸播放页与手机歌词页均可查看翻译。双击电脑歌词或点击手机歌词可跳转；手动滚动时暂停自动跟随，稍后恢复。歌词工具栏提供时间偏移调整，双击偏移数值可重置；桌面歌词锁定后可以从托盘解锁。
 
 ### 管理播放队列
 
@@ -89,6 +112,23 @@ chilimusic 是一款面向 Windows 的音乐播放器，支持本地音乐与 Na
 
 “快捷键”中可更换播放与暂停键、关闭全局接管，或单独启用投影 / 表情功能键接管。设置会检查相同键和已注册快捷键冲突，退出播放器后恢复原功能。
 
+### 手机遥控与播放
+
+1. 手机和电脑连接同一 Wi-Fi 或局域网。在主界面或托盘菜单打开“手机遥控”，点击“开启手机遥控”。
+2. 用手机扫描二维码，也可在浏览器输入窗口中的地址。如果电脑有多个网卡，可从下拉列表选择手机能访问的网络。
+3. 在手机网页输入电脑上显示的六位配对码。进入后默认控制电脑播放。
+4. 点击“手机播放”把声音切到当前手机；点击“电脑播放”切回电脑。切换时保留歌曲和播放位置，电脑需要保持运行。
+
+网页提供播放、队列与曲库三个页面，支持 Navidrome 搜索、专辑浏览、本地 / 离线音乐、播放模式、收藏、静音、音量和进度调整。无需安装手机应用，Android 使用 Chrome，iPhone 使用 Safari；iPhone 在手机播放时用实体音量键调整音量。浏览器要求手动开始音频时，再点一次播放按钮。
+
+网页打不开时，点击电脑端的“允许局域网连接”，按 Windows 提示允许添加防火墙规则；规则只放行此播放器的 TCP 47831 端口和本地子网。Wi-Fi 被 Windows 标为公用网络时，可勾选“也允许公用网络中的局域网连接”后再添加规则。访客 Wi-Fi、无线客户端隔离或 VPN 可能阻止手机访问电脑。
+
+手机音频格式由浏览器支持情况决定；Navidrome 可按需转为 MP3，需服务器具备转码能力。本地 / 离线文件直接播放，遇到浏览器不支持的格式可切回电脑播放。手机音频由电脑转发，Navidrome 地址和登录信息不会发送到网页。“重新配对”会断开已有设备，“关闭手机遥控”会停止局域网服务。
+
+### 选择配色
+
+在“设置 → 常规”选择主题：月华清霜、花笺春信、庭芳新绿、东方既白、春风入野、清澜映月、青森流响、流霞映晚、霓虹频谱、墨夜星河、海雾青岚、紫夜星河和醇棕晨雾。也可选择“跟随系统”，或启用专辑封面强调色。任务栏控件保持与 Windows 任务栏一致的文字颜色。
+
 ## 常用操作
 
 | 操作 | 功能 |
@@ -113,7 +153,7 @@ chilimusic 是一款面向 Windows 的音乐播放器，支持本地音乐与 Na
 
 **启动时提示需要安装 .NET？**
 
-安装 Windows 版 .NET 8 **Desktop Runtime x64**，安装完成后重新启动播放器。
+安装 Windows 版 [.NET 8 Desktop Runtime x64](https://dotnet.microsoft.com/zh-cn/download/dotnet/8.0)，安装完成后重新启动播放器。仅安装 .NET Runtime 或其他大版本不能替代桌面运行时。
 
 **如何关闭窗口后继续听歌？**
 
@@ -134,7 +174,15 @@ cd chilimusic
 .\tools\build.ps1 -OutputDirectory .\dist
 ```
 
-`setup-native.ps1` 下载固定版本的 libmpv 并校验 SHA256，`build.ps1` 生成 Windows x64 发行文件。完成后运行 `dist\chilimusic.exe`。
+`setup-native.ps1` 下载固定版本的 libmpv 和 Vulkan Loader 并校验 SHA256，`build.ps1` 生成 Windows x64 发行文件。完成后运行 `dist\chilimusic.exe`。
+
+制作 EXE 安装包还需 [Inno Setup 7](https://jrsoftware.org/isdl.php)。安装后运行：
+
+```powershell
+.\tools\build-installer.ps1 -InnoSetupPath 'C:\Program Files\Inno Setup 7\ISCC.exe'
+```
+
+安装包与 SHA256 校验文件生成在 `release` 目录。
 
 发行版使用 MiSans 字体。需要以相同字体构建时，从[小米官方字体页面](https://hyperos.mi.com/font/en/download/)取得 MiSans Regular、Medium、Semibold 静态字体，放入 `src/Resources/Fonts`；未提供这些字体时，应用使用系统字体。
 
@@ -143,8 +191,11 @@ cd chilimusic
 chilimusic 以 [GPL-3.0-or-later](LICENSE.txt) 协议开源。
 
 - [mpv / libmpv](https://github.com/mpv-player/mpv)：音频播放引擎，许可与构建来源见 [libmpv 说明](licenses/mpv-NOTICE.txt)。
+- [Vulkan Loader](https://github.com/KhronosGroup/Vulkan-Loader)：libmpv 的原生依赖，采用 LunarG 官方签名的 x64 组件，遵循 [Apache 2.0 与 MIT 许可](licenses/VulkanRT-License.txt)。
 - [MiSans](https://hyperos.mi.com/font/en/download/)：界面字体，遵循[字体许可说明](licenses/MiSans-NOTICE.txt)。
 - [TagLibSharp](https://github.com/mono/taglib-sharp)：本地音乐标签、内嵌封面和歌词，见[许可说明](licenses/TagLibSharp-NOTICE.txt)。
+- [QRCoder](https://github.com/codebude/QRCoder)：手机连接二维码，遵循 [MIT 许可](licenses/QRCoder-MIT.txt)。
+- [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)：网易云接口适配参考，遵循 [MIT 许可](licenses/NeteaseCloudMusicApi-MIT.txt)。
 - [Navidrome](https://www.navidrome.org/)：私人音乐服务器。
 
 欢迎通过 [Issues](https://github.com/sawanolin/chilimusic/issues) 提交问题或建议。报告问题时请说明 Windows 版本、播放器版本、使用场景和复现步骤。

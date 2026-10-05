@@ -6,13 +6,16 @@ using System.Text.Json;
 namespace ChiliMusic;
 
 public sealed class ApiException(string message) : Exception(message);
-public sealed class NavidromeApiClient : IDisposable
+public class NavidromeApiClient : IDisposable
 {
     private HttpClient _http = null!;
     private AppSettings _settings = new();
     private string _password = "";
-    public bool Configured => !string.IsNullOrEmpty(_settings.Server) && !string.IsNullOrEmpty(_password);
-    public string CacheScope => _settings.Server + "\0" + _settings.Username;
+    public virtual bool Configured => !string.IsNullOrEmpty(_settings.Server) && !string.IsNullOrEmpty(_password);
+    public virtual string CacheScope => _settings.Server + "\0" + _settings.Username;
+    public virtual string ScopeForId(string id) => CacheScope;
+    public virtual bool CacheScopeAllowed(string scope) => scope == CacheScope;
+    public virtual Task<string> StreamUrlAsync(Track track, CancellationToken ct = default) => Task.FromResult(Url("stream", ("id", track.Id)));
     public NavidromeApiClient(AppSettings settings, string password) => Configure(settings, password);
     public void Configure(AppSettings settings, string password)
     {
@@ -26,7 +29,7 @@ public sealed class NavidromeApiClient : IDisposable
         if (!Uri.TryCreate(input.Trim().TrimEnd('/') + "/", UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https") || !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment)) throw new ApiException("服务器地址必须是 HTTP/HTTPS 地址，可以包含子路径，不能包含账户、查询参数或片段。");
         return uri.AbsoluteUri.TrimEnd('/');
     }
-    public string Url(string endpoint, params (string Key, string Value)[] args)
+    public virtual string Url(string endpoint, params (string Key, string Value)[] args)
     {
         var salt = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
         var token = Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(_password + salt))).ToLowerInvariant();
@@ -45,7 +48,7 @@ public sealed class NavidromeApiClient : IDisposable
         }
         catch (HttpRequestException e) { throw new ApiException(e.InnerException is System.Security.Authentication.AuthenticationException ? "TLS 证书验证失败，请检查证书及主机名。" : "服务器不可访问，请检查地址、网络和代理。"); }
     }
-    public async Task<JsonElement> CallAsync(string endpoint, CancellationToken ct = default, params (string Key, string Value)[] args)
+    public virtual async Task<JsonElement> CallAsync(string endpoint, CancellationToken ct = default, params (string Key, string Value)[] args)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(10));
         try
@@ -65,7 +68,7 @@ public sealed class NavidromeApiClient : IDisposable
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new ApiException("请求超时（10 秒），请检查服务器和网络。"); }
         catch (JsonException) { throw new ApiException("API 不兼容：服务器没有返回有效 JSON，请检查服务地址及反向代理。"); }
     }
-    public async Task<string> PingAsync(CancellationToken ct = default)
+    public virtual async Task<string> PingAsync(CancellationToken ct = default)
     {
         var e = await CallAsync("ping", ct); return $"{Text(e, "type", "Subsonic")} {Text(e, "serverVersion", Text(e, "version", ""))}";
     }
@@ -75,14 +78,14 @@ public sealed class NavidromeApiClient : IDisposable
     public async Task<List<Track>> StarredAsync() => Tracks(await CallAsync("getStarred2"), "starred2");
     public Task<JsonElement> StarAsync(string id, bool star) => CallAsync(star ? "star" : "unstar", default, ("id", id));
     public Task<JsonElement> ScrobbleAsync(string id, bool submission) => CallAsync("scrobble", default, ("id", id), ("submission", submission ? "true" : "false"), ("time", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString()));
-    public async Task<string?> ProbeTypeAsync(string id, CancellationToken ct)
+    public virtual async Task<string?> ProbeTypeAsync(string id, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(10));
         using var request = new HttpRequestMessage(HttpMethod.Get, Url("stream", ("id", id)));
         request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
         using var response = await SendAsync(request, timeout.Token); return response.Content.Headers.ContentType?.MediaType;
     }
-    public async Task<byte[]> CoverAsync(string id, CancellationToken ct)
+    public virtual async Task<byte[]> CoverAsync(string id, CancellationToken ct)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(10));
         using var request = new HttpRequestMessage(HttpMethod.Get, Url("getCoverArt", ("id", id), ("size", "480")));
@@ -92,7 +95,15 @@ public sealed class NavidromeApiClient : IDisposable
         while ((n = await stream.ReadAsync(buffer, timeout.Token)) > 0) { if (memory.Length + n > 10 * 1024 * 1024) throw new ApiException("封面超过 10 MB。"); memory.Write(buffer, 0, n); }
         return memory.ToArray();
     }
-    public async Task DownloadAsync(string id, string destination, long maxBytes, IProgress<(long Bytes, long? Total)>? progress, CancellationToken ct)
+    internal virtual async Task<HttpResponseMessage> OpenPhoneStreamAsync(Track track, bool mp3, string? range, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, mp3 ? Url("stream", ("id", track.Id), ("format", "mp3"), ("maxBitRate", "256")) : Url("stream", ("id", track.Id)));
+        if (range != null && System.Net.Http.Headers.RangeHeaderValue.TryParse(range, out var parsed) && parsed.Ranges.Count == 1) request.Headers.Range = parsed;
+        var response = await SendAsync(request, ct); string type = response.Content.Headers.ContentType?.MediaType ?? "";
+        if (type.StartsWith("text/") || type.Contains("json") || type.Contains("xml")) { response.Dispose(); throw new ApiException("服务器未提供可播放音频。"); }
+        return response;
+    }
+    public virtual async Task DownloadAsync(string id, string destination, long maxBytes, IProgress<(long Bytes, long? Total)>? progress, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, Url("download", ("id", id)));
         using var stalled = CancellationTokenSource.CreateLinkedTokenSource(ct); stalled.CancelAfter(TimeSpan.FromSeconds(30));
@@ -124,5 +135,5 @@ public sealed class NavidromeApiClient : IDisposable
         if (add != null) args.AddRange(add.Select(song => ("songIdToAdd", song))); if (remove != null) args.AddRange(remove.Select(index => ("songIndexToRemove", index.ToString())));
         return CallAsync("updatePlaylist", default, args.ToArray());
     }
-    public void Dispose() => _http.Dispose();
+    public virtual void Dispose() => _http.Dispose();
 }

@@ -36,13 +36,13 @@ public sealed class FunctionKeyService : IDisposable
             if (_blocked.Add(key.Vk))
             {
                 if (_winHeld) MaskWindowsMenu();
-                Application.Current.Dispatcher.BeginInvoke(() => { if (play) _vm.Run(PlayAsync); else { if (!_vm.Player.IsIdle) _vm.Player.Pause(); _vm.Changed(nameof(_vm.PlayGlyph)); _vm.Status = "已暂停"; } });
+                Application.Current.Dispatcher.BeginInvoke(() => { if (play) _vm.Run(PlayAsync); else { _vm.PausePlayback(); _vm.Changed(nameof(_vm.PlayGlyph)); _vm.Status = "已暂停"; } });
             }
             return new IntPtr(1);
         }
         return CallNextHookEx(_hook, code, message, ptr);
     }
-    private Task PlayAsync() { if (_vm.Player.IsIdle) return _vm.ToggleAsync(); _vm.Player.Resume(); _vm.Changed(nameof(_vm.PlayGlyph)); _vm.Status = "正在播放"; return Task.CompletedTask; }
+    private Task PlayAsync() => _vm.ResumePlaybackAsync();
     private static void MaskWindowsMenu() { var input = new[] { new Input { Type = 1, Data = new() { Key = new() { Vk = 0x11, Extra = MaskTag } } }, new Input { Type = 1, Data = new() { Key = new() { Vk = 0x11, Flags = 2, Extra = MaskTag } } } }; SendInput(2, input, Marshal.SizeOf<Input>()); }
     public void Dispose() { if (_hook != IntPtr.Zero) { UnhookWindowsHookEx(_hook); _hook = IntPtr.Zero; } _blocked.Clear(); }
 }

@@ -12,6 +12,7 @@ public sealed class Track : System.ComponentModel.INotifyPropertyChanged
     public string Title { get; set; } = "";
     public string Artist { get; set; } = "";
     public string Album { get; set; } = "";
+    public string AlbumId { get; set; } = "";
     public string? CoverArt { get; set; }
     public string? Suffix { get; set; }
     public string? ContentType { get; set; }
@@ -30,6 +31,8 @@ public sealed class Track : System.ComponentModel.INotifyPropertyChanged
     public long FileSize { get; set; }
     public DateTime FileModifiedUtc { get; set; }
     public bool Missing { get; set; }
+    public bool Preview { get; set; }
+    [JsonIgnore] public bool IsNetease => Id.StartsWith("ncm:", StringComparison.Ordinal);
     public string Fingerprint { get; set; } = "";
     [JsonIgnore] public string Subtitle => string.Join(" · ", new[] { Artist, Album }.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct());
     [JsonIgnore] public string Format => string.IsNullOrEmpty(Suffix) ? "未知格式" : Suffix.ToUpperInvariant();
@@ -48,6 +51,9 @@ public enum PlayMode { Sequential, RepeatAll, RepeatOne, Shuffle }
 public sealed record AudioField(string Label, string Value);
 public sealed class AppSettings
 {
+    public string CatalogSource { get; set; } = "navidrome";
+    public string NeteaseQuality { get; set; } = "exhigh";
+    public bool NeteaseLyrics { get; set; } = true;
     public string Server { get; set; } = "";
     public string Username { get; set; } = "";
     public string? ProtectedPassword { get; set; }

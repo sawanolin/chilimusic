@@ -74,6 +74,8 @@ public sealed partial class PlayerViewModel
             if (Api.Configured) { var root = await Api.CallAsync("getPlaylists", ct); if (root.TryGetProperty("playlists", out var lists)) Rows(lists, "playlist", "playlist", items); }
         }
         else if (_browseItem?.Kind == "local-playlist") tracks.AddRange(Playlists.Local.FirstOrDefault(p => p.Id == _browseItem.Id)?.Tracks ?? []);
+        else if (Section == "最近播放" && IsNeteaseCatalog) tracks.AddRange(await Api.Netease.RecentSongsAsync(ct));
+        else if (Section == "每日推荐") tracks.AddRange(NavidromeApiClient.Tracks(await Api.CallAsync("getDailyRecommendations", ct), "randomSongs"));
         else if (Section == "收藏") tracks.AddRange((Api.Configured ? await Api.StarredAsync() : []).Concat(_localTracks.Where(t => t.Starred != null)));
         else if (Section == "随机") tracks.AddRange(Api.Configured ? await Api.RandomAsync() : _localTracks.OrderBy(_ => Random.Shared.Next()));
         else if (Api.Configured)
@@ -153,7 +155,7 @@ public sealed partial class PlayerViewModel
     public async Task AddToPlaylistAsync(string id, bool server, IEnumerable<Track> tracks)
     {
         var selected = tracks.ToList();
-        if (server) { if (selected.Any(t => t.IsLocal)) throw new ApiException("服务器歌单只能添加服务器歌曲。"); await Api.UpdatePlaylistAsync(id, add: selected.Select(t => t.Id)); }
+        if (server) { if (selected.Any(t => t.IsLocal || t.IsNetease != id.StartsWith("ncm:", StringComparison.Ordinal))) throw new ApiException("歌单只能添加相同音乐来源的歌曲。"); await Api.UpdatePlaylistAsync(id, add: selected.Select(t => t.Id)); }
         else { var playlist = Playlists.Local.First(p => p.Id == id); playlist.Tracks.AddRange(selected); Playlists.Save(); }
         Status = "已添加到歌单";
     }

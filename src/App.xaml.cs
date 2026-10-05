@@ -13,13 +13,23 @@ public partial class App : Application
     private FunctionKeyService? _functionKeys;
     private MiniPlayerWindow? _mini; private MainWindow? _main; private SettingsWindow? _settingsWindow;
     private MusicToolsWindow? _tools; private DesktopLyricsWindow? _desktopLyrics;
+    internal RemoteControlService Remote { get; private set; } = null!;
+    private RemoteControlWindow? _remoteWindow;
+    private NeteaseAccountWindow? _neteaseWindow;
+    private ImmersiveWindow? _immersiveWindow;
+    private LyricsMatchWindow? _lyricsMatch;
     public PlayerViewModel Vm { get; private set; } = null!;
     public bool Exiting { get; private set; }
-    private string InstanceName => "ChiliMusic-" + WindowsIdentity.GetCurrent().User!.Value;
+    private bool _remoteQa;
+    private string InstanceName => "ChiliMusic-" + WindowsIdentity.GetCurrent().User!.Value + (_remoteQa ? "-remote-qa" : "");
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Contains("--qa-netease-account")) { await NeteaseVerification.AccountAsync(); Shutdown(); return; }
+        if (e.Args.Contains("--qa-netease-network")) { await NeteaseVerification.NetworkAsync(); Shutdown(); return; }
+        if (e.Args.Contains("--allow-remote") || e.Args.Contains("--allow-remote-public")) { bool allowed = RemoteFirewall.Allow(e.Args.Contains("--allow-remote-public")); if (!allowed) MessageBox.Show("未能添加连接规则，请在 Windows 防火墙中允许 chilimusic 通过专用网络。", "chilimusic"); Shutdown(allowed ? 0 : 1); return; }
         if (e.Args.Contains("--self-test")) { try { await SelfTest.RunAsync(e.Args); Shutdown(0); } catch (Exception error) { Store.Write("selftest-failure.json", new { Error = error.GetType().Name, Message = error is ApiException ? error.Message : "验收失败" }); Shutdown(1); } return; }
+        if (e.Args.Contains("--qa-remote") || e.Args.Contains("--qa-quality") || e.Args.Contains("--qa-netease-ui") || e.Args.Contains("--qa-netease-full")) { FeatureVerification.RequireIsolatedProfile(); _remoteQa = true; }
         _mutex = new Mutex(true, @"Local\" + InstanceName, out _ownsMutex);
         if (!_ownsMutex) { try { using var pipe = new NamedPipeClientStream(".", InstanceName, PipeDirection.Out); await pipe.ConnectAsync(2000); await pipe.WriteAsync(new byte[] { 1 }); } catch (IOException) { } catch (TimeoutException) { } Shutdown(); return; }
         DispatcherUnhandledException += (_, args) => { Store.Log("ERROR", $"UI 异常 {args.Exception.GetType().Name}"); if (Vm != null) Vm.Status = "操作发生异常，请重试。"; args.Handled = true; };
@@ -27,10 +37,16 @@ public partial class App : Application
         {
             var settings = Store.Read("config.json", new AppSettings()); string password = "";
             try { password = CredentialService.Unprotect(settings.ProtectedPassword); } catch { Store.Log("WARNING", "无法解密已有账户，请重新登录。"); }
+            if (settings.StartWithWindows && !e.Args.Any(arg => arg.StartsWith("--qa", StringComparison.Ordinal))) Store.SetStartup(true);
             NativeFonts.Initialize(); Theme.Apply(settings.Theme); Vm = new(settings, password); _mini = new(Vm); new WindowInteropHelper(_mini).EnsureHandle();
+            Remote = new(Vm);
             try { Vm.Media = new(new WindowInteropHelper(_mini).Handle); Vm.Media.ButtonPressed += button => Dispatcher.BeginInvoke(() => OnMedia(button)); } catch (Exception ex) { Vm.Status = "系统媒体控制初始化失败"; Store.Log("ERROR", $"SMTC 初始化失败 {ex.GetType().Name}"); }
             CreateTray(); _taskbar = new(Vm, this); Vm.SettingsChanged += OnSettingsChanged; Store.Write("taskbar-diagnostics.json", _taskbar.Diagnostics()); _functionKeys = new(Vm); SystemEvents.UserPreferenceChanged += OnPreferences; _ = ListenAsync();
-            if (e.Args.Contains("--qa-features")) Vm.Run(() => FeatureUiVerification.RunAsync(this, _taskbar, e.Args.Contains("--qa-quick")));
+            if (e.Args.Contains("--qa-netease-full")) Vm.Run(() => NeteaseVerification.FullAsync(this));
+            else if (e.Args.Contains("--qa-netease-ui")) Vm.Run(() => NeteaseVerification.UiAsync(this));
+            else if (e.Args.Contains("--qa-quality")) Vm.Run(() => UiVerification.RunQualityAsync(this));
+            else if (_remoteQa) Vm.Run(() => RemoteVerification.RunAsync(this, _taskbar));
+            else if (e.Args.Contains("--qa-features")) Vm.Run(() => FeatureUiVerification.RunAsync(this, _taskbar, e.Args.Contains("--qa-quick")));
             else if (e.Args.Contains("--qa-layout")) Vm.Run(() => UiVerification.RunLayoutAsync(this, _taskbar, e.Args.Skip(1).ToArray()));
             else if (e.Args.Contains("--qa-local")) Vm.Run(() => UiVerification.RunLocalAsync(this, e.Args.Skip(1).ToArray()));
             else if (Vm.Api.Configured) { if (e.Args.Contains("--qa-ui")) Vm.Run(() => UiVerification.RunAsync(this, _taskbar)); else { Vm.Run(Vm.ConnectAsync); if (!settings.StartInTray) ShowMain(); } } else ShowMain();
@@ -45,6 +61,8 @@ public partial class App : Application
         var now = menu.Items.Add("尚未播放"); now.Enabled = false; menu.Opening += (_, _) => now.Text = Vm.Current is { } t ? $"正在播放：{t.Artist} - {t.Title}" : "尚未播放";
         void Item(string title, Action action) { menu.Items.Add(title, null, (_, _) => Dispatcher.Invoke(action)); }
         Item("播放 / 暂停", () => Vm.Run(Vm.ToggleAsync)); Item("上一首", () => Vm.Run(Vm.PreviousAsync)); Item("下一首", () => Vm.Run(() => Vm.NextAsync(false))); menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+        Item("网易云账号", ShowNetease);
+        Item("手机遥控", ShowRemote);
         Item("随机播放全部", () => Vm.Run(() => Vm.RandomAsync(false))); Item("随机播放收藏", () => Vm.Run(() => Vm.RandomAsync(true))); menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         Item("显示播放器", ShowMini); Item("搜索", () => ShowMain(false, true)); Item("打开本地音乐…", () => { ShowMain(); _main!.OpenLocalFiles(); }); Item("歌词与歌单", () => ShowTools("歌词")); Item("桌面歌词", ToggleDesktopLyrics); Item("解锁桌面歌词", () => _desktopLyrics?.Unlock()); Item("离线下载", () => ShowTools("离线")); Item("定时停止", () => ShowTools("定时")); Item("设置", ShowSettings); Item("退出", Exit); _tray.ContextMenuStrip = menu;
         _trayClick.Interval = TimeSpan.FromMilliseconds(System.Windows.Forms.SystemInformation.DoubleClickTime); _trayClick.Tick += (_, _) => { _trayClick.Stop(); if (_mini!.IsVisible) _mini.Hide(); else ShowMini(); };
@@ -53,7 +71,7 @@ public partial class App : Application
     }
     private void OnMedia(SystemMediaTransportControlsButton button)
     {
-        switch (button) { case SystemMediaTransportControlsButton.Play: Vm.Run(() => Vm.Player.IsIdle ? Vm.ToggleAsync() : ResumeAsync()); break; case SystemMediaTransportControlsButton.Pause: Vm.Player.Pause(); Vm.Changed(nameof(Vm.PlayGlyph)); break; case SystemMediaTransportControlsButton.Next: Vm.Run(() => Vm.NextAsync(false)); break; case SystemMediaTransportControlsButton.Previous: Vm.Run(Vm.PreviousAsync); break; case SystemMediaTransportControlsButton.Stop: Vm.Stop(); break; }
+        switch (button) { case SystemMediaTransportControlsButton.Play: Vm.Run(Vm.ResumePlaybackAsync); break; case SystemMediaTransportControlsButton.Pause: Vm.PausePlayback(); break; case SystemMediaTransportControlsButton.Next: Vm.Run(() => Vm.NextAsync(false)); break; case SystemMediaTransportControlsButton.Previous: Vm.Run(Vm.PreviousAsync); break; case SystemMediaTransportControlsButton.Stop: Vm.Stop(); break; }
     }
     private Task ResumeAsync() { Vm.Player.Resume(); Vm.Changed(nameof(Vm.PlayGlyph)); return Task.CompletedTask; }
     private async Task ListenAsync()
@@ -69,11 +87,27 @@ public partial class App : Application
     public void ShowMini() { if (_mini != null) _mini.Popup(); }
     public void ShowTrayMenu() => _trayMenu?.Show(System.Windows.Forms.Cursor.Position);
     internal void CaptureTrayMenu(string path) { if (_trayMenu == null) return; _trayMenu.Show(new System.Drawing.Point(50, 50)); using var bitmap = new System.Drawing.Bitmap(_trayMenu.Width, _trayMenu.Height); _trayMenu.DrawToBitmap(bitmap, new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height)); bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png); _trayMenu.Hide(); }
+    public void ShowNetease()
+    {
+        if (_neteaseWindow == null) { _neteaseWindow = new(Vm); _neteaseWindow.Closed += (_, _) => _neteaseWindow = null; }
+        _neteaseWindow.Show(); _neteaseWindow.Activate();
+    }
+    public void ShowImmersive()
+    {
+        if (_immersiveWindow == null) { _immersiveWindow = new(Vm); _immersiveWindow.Closed += (_, _) => _immersiveWindow = null; }
+        _mini?.Hide(); _main?.Hide(); _immersiveWindow.Show(); _immersiveWindow.Activate();
+    }
+    public void ShowLyricsMatch()
+    {
+        if (_lyricsMatch == null) { _lyricsMatch = new(Vm); _lyricsMatch.Closed += (_, _) => _lyricsMatch = null; }
+        _lyricsMatch.Show(); _lyricsMatch.Activate();
+    }
     public void ShowMain(bool queue = false, bool search = false)
     {
         _mini?.Hide(); bool created = _main == null; _main ??= new(Vm); _main.Show(); _main.WindowState = WindowState.Normal; _main.Activate(); if (created) Vm.Run(() => Vm.BrowseAsync(Vm.Api.Configured ? "最近添加" : "本地音乐")); if (queue) _main.FocusQueue(); if (search) _main.FocusSearch();
     }
     public void ShowSettings() { _mini?.Hide(); if (_settingsWindow != null) { _settingsWindow.Activate(); return; } _settingsWindow = new(Vm); _settingsWindow.Closed += (_, _) => _settingsWindow = null; _settingsWindow.Show(); }
+    public void ShowRemote() { if (_remoteWindow == null) { _remoteWindow = new(Remote); _remoteWindow.Closed += (_, _) => _remoteWindow = null; } _remoteWindow.Show(); _remoteWindow.Activate(); }
     private void OnSettingsChanged() => _taskbar?.Refresh();
     public void ShowTools(string tab, IEnumerable<Track>? selection = null)
     {
@@ -91,7 +125,7 @@ public partial class App : Application
     {
         if (Exiting) return; Exiting = true; _exitCts.Cancel(); _trayClick.Stop(); SystemEvents.UserPreferenceChanged -= OnPreferences;
         if (Vm != null) Vm.SettingsChanged -= OnSettingsChanged;
-        _functionKeys?.Dispose(); _taskbar?.Dispose(); _tray?.Dispose(); _icon?.Dispose(); NativeFonts.Dispose(); try { Vm?.Dispose(); } catch (Exception e) { Store.Log("ERROR", $"退出保存失败 {e.GetType().Name}"); }
+        Remote?.Dispose(); _functionKeys?.Dispose(); _taskbar?.Dispose(); _tray?.Dispose(); _icon?.Dispose(); NativeFonts.Dispose(); try { Vm?.Dispose(); } catch (Exception e) { Store.Log("ERROR", $"退出保存失败 {e.GetType().Name}"); }
         Shutdown();
     }
     protected override void OnExit(ExitEventArgs e) { if (_ownsMutex) _mutex?.ReleaseMutex(); _mutex?.Dispose(); _exitCts.Dispose(); base.OnExit(e); }

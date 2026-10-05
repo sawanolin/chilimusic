@@ -1,6 +1,7 @@
 param([string]$ArchivePath)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+& (Join-Path $PSScriptRoot 'setup-vulkan.ps1')
 $nativeDirectory = Join-Path $projectRoot 'src\Native'
 $target = Join-Path $nativeDirectory 'mpv-2.dll'
 $expected = '525D5F99A484F0DDCA2FD00F3F3E0402733F2218A22BE522FACBCDF09EA70088'

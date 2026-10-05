@@ -49,6 +49,7 @@ public sealed class MpvPlayerService : IAudioPlayer
         {
             Option("config", "no"); Option("terminal", "no"); Option("msg-level", "all=no"); Option("vid", "no"); Option("idle", "yes"); Option("ytdl", "no"); Option("curl-enabled", "no");
             Option("ao", nullAudio ? "null" : "wasapi"); Option("audio-exclusive", settings.Exclusive ? "yes" : "no");
+            if (WindowsTlsCertificates.BundlePath() is { } certificates) Option("tls-ca-file", certificates);
             Option("audio-device", settings.AudioDevice); Option("replaygain", settings.ReplayGain); Option("replaygain-preamp", settings.ReplayGainPreamp.ToString(System.Globalization.CultureInfo.InvariantCulture)); Option("replaygain-clip", "no"); Option("prefetch-playlist", settings.PrefetchNext ? "yes" : "no");
             Option("tls-verify", settings.AllowUntrustedCertificate ? "no" : "yes"); Option("cache", "yes"); Option("cache-secs", "8"); Option("demuxer-max-bytes", "16777216");
             Option("demuxer-max-back-bytes", "4194304"); Option("network-timeout", "15"); Option("gapless-audio", "yes"); Option("volume", settings.Volume.ToString(System.Globalization.CultureInfo.InvariantCulture));

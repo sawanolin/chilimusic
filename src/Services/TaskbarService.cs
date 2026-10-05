@@ -8,6 +8,7 @@ namespace ChiliMusic;
 
 public sealed class TaskbarService : IDisposable
 {
+    private static DColor ThemeProgressColor() { var c = ((System.Windows.Media.SolidColorBrush)Application.Current.Resources["AccentBrush"]).Color; return DColor.FromArgb(c.R, c.G, c.B); }
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindow(string cls, string? title);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowEx(IntPtr p, IntPtr after, string cls, string? title);
@@ -104,7 +105,7 @@ public sealed class TaskbarService : IDisposable
             float play = buttons + 44;
             if (_vm.PlayGlyph == "▶") g.FillPolygon(textBrush, new[] { new System.Drawing.PointF(play, cy - 5), new System.Drawing.PointF(play, cy + 5), new System.Drawing.PointF(play + 8, cy) }); else { g.DrawLine(white, play, cy - 4, play, cy + 4); g.DrawLine(white, play + 6, cy - 4, play + 6, cy + 4); }
             Mode(g, pen, textBrush, artistFont, buttons + 112, cy, _vm.Settings.Mode);
-            if (_vm.Duration > 0) { using var progress = new System.Drawing.Pen(DColor.FromArgb(92, 157, 248), 1.5f); g.DrawLine(progress, 8, h - 2, 8 + (float)Math.Clamp(_vm.Position / _vm.Duration, 0, 1) * Math.Max(0, buttons - 15), h - 2); }
+            if (_vm.Duration > 0) { using var progress = new System.Drawing.Pen(ThemeProgressColor(), 1.5f); g.DrawLine(progress, 8, h - 2, 8 + (float)Math.Clamp(_vm.Position / _vm.Duration, 0, 1) * Math.Max(0, buttons - 15), h - 2); }
         }
         private static bool TaskbarDark() { try { using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"); return (int?)key?.GetValue("SystemUsesLightTheme") == 0; } catch { return Theme.IsDark; } }
         protected override void OnMouseMove(System.Windows.Forms.MouseEventArgs e) { base.OnMouseMove(e); int hover = ButtonAt(e.X); if (hover != _hover) { _hover = hover; RenderLayer(); } string tip = hover switch { 3 => _vm.ModeText, 2 => "下一首", 1 => _vm.PlayGlyph == "▶" ? "播放" : "暂停", 0 => "上一首", _ => $"{_vm.Title} · {_vm.Artist}" }; if (tip != _lastTip) { _lastTip = tip; _tips.SetToolTip(this, tip); } }

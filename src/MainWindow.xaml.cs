@@ -10,6 +10,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _searchTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private readonly DispatcherTimer _coverTimer = new() { Interval = TimeSpan.FromMilliseconds(160) };
     private Point _dragStart; private int _dragIndex = -1;
+    private void ImmersiveClick(object sender, RoutedEventArgs e) => Host.ShowImmersive();
     public MainWindow(PlayerViewModel vm)
     {
         InitializeComponent(); WindowAppearance.Attach(this); DataContext = vm;
@@ -46,6 +47,8 @@ public partial class MainWindow : Window
     private void CategoryChanged(object sender, SelectionChangedEventArgs e) { if (DataContext is PlayerViewModel vm && CategoryBox.SelectedItem is ComboBoxItem item) vm.SearchCategory = (string)item.Content; }
     private void FormatChanged(object sender, SelectionChangedEventArgs e) { if (DataContext is PlayerViewModel vm && FormatBox.SelectedItem is ComboBoxItem item) vm.FormatFilter = (string)item.Content; }
     private void SortChanged(object sender, SelectionChangedEventArgs e) { if (DataContext is PlayerViewModel vm && SortBox.SelectedItem is ComboBoxItem item) vm.AlbumSort = (string)item.Tag; }
+    private void NeteaseClick(object sender, RoutedEventArgs e) => Host.ShowNetease();
+    private void RemoteClick(object sender, RoutedEventArgs e) => Host.ShowRemote();
     private void LyricsClick(object sender, RoutedEventArgs e) => Host.ShowTools("歌词");
     private void FiltersClick(object sender, RoutedEventArgs e) => FilterFields.Visibility = FilterFields.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
     private void LoadMoreClick(object sender, RoutedEventArgs e) => Vm.Run(Vm.LoadMoreAsync);

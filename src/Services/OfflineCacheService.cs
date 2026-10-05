@@ -27,6 +27,7 @@ public sealed class OfflineCacheService(NavidromeApiClient api, AppSettings sett
     public async Task DownloadAsync(IEnumerable<Track> tracks)
     {
         if (Downloading) throw new ApiException("已有下载任务，请等待完成或取消。");
+        if (tracks.Any(t => t.IsNetease)) throw new ApiException("网易云歌曲暂不支持离线缓存，请使用官方客户端下载。");
         var items = tracks.Where(t => !t.IsLocal).DistinctBy(t => t.Id).ToList(); if (items.Count == 0) throw new ApiException("请选择服务器歌曲。");
         Downloading = true; _download = CancellationTokenSource.CreateLinkedTokenSource(_life.Token); var ct = _download.Token; int completed = 0; string activeScope = Scope, apiScope = api.CacheScope;
         Updated?.Invoke();

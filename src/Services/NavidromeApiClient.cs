@@ -19,7 +19,7 @@ public sealed class NavidromeApiClient : IDisposable
         _http?.Dispose(); _settings = settings; _password = password;
         var handler = new SocketsHttpHandler { ConnectTimeout = TimeSpan.FromSeconds(10), PooledConnectionLifetime = TimeSpan.FromMinutes(5), AllowAutoRedirect = false };
         if (settings.AllowUntrustedCertificate) handler.SslOptions.RemoteCertificateValidationCallback = (_, _, _, _) => true;
-        _http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }; _http.DefaultRequestHeaders.UserAgent.ParseAdd("ChiliMusic/1.0");
+        _http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }; _http.DefaultRequestHeaders.UserAgent.ParseAdd("chilimusic/1.1");
     }
     public static string ValidateServer(string input)
     {
@@ -31,7 +31,7 @@ public sealed class NavidromeApiClient : IDisposable
         var salt = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
         var token = Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes(_password + salt))).ToLowerInvariant();
         var pairs = new List<(string, string)> { ("u", _settings.Username), ("t", token), ("s", salt), ("v", "1.16.1"), ("c", "ChiliMusic") };
-        if (endpoint is not ("stream" or "getCoverArt")) pairs.Add(("f", "json"));
+        if (endpoint is not ("stream" or "download" or "getCoverArt")) pairs.Add(("f", "json"));
         pairs.AddRange(args);
         return ValidateServer(_settings.Server) + "/rest/" + endpoint + ".view?" + string.Join("&", pairs.Select(p => $"{Uri.EscapeDataString(p.Item1)}={Uri.EscapeDataString(p.Item2)}"));
     }
@@ -91,6 +91,38 @@ public sealed class NavidromeApiClient : IDisposable
         byte[] buffer = new byte[8192]; int n;
         while ((n = await stream.ReadAsync(buffer, timeout.Token)) > 0) { if (memory.Length + n > 10 * 1024 * 1024) throw new ApiException("封面超过 10 MB。"); memory.Write(buffer, 0, n); }
         return memory.ToArray();
+    }
+    public async Task DownloadAsync(string id, string destination, long maxBytes, IProgress<(long Bytes, long? Total)>? progress, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, Url("download", ("id", id)));
+        using var stalled = CancellationTokenSource.CreateLinkedTokenSource(ct); stalled.CancelAfter(TimeSpan.FromSeconds(30));
+        using var response = await SendAsync(request, stalled.Token);
+        string type = response.Content.Headers.ContentType?.MediaType?.ToLowerInvariant() ?? "";
+        if (type.StartsWith("text/") || type.EndsWith("json") || type.EndsWith("xml")) throw new ApiException("服务器未允许下载这首歌曲。");
+        long? total = response.Content.Headers.ContentLength;
+        if (total > maxBytes) throw new ApiException("这首歌曲超过离线缓存容量。");
+        await using var input = await response.Content.ReadAsStreamAsync(ct);
+        await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true);
+        byte[] buffer = new byte[65536]; long written = 0; int read;
+        while ((read = await input.ReadAsync(buffer, stalled.Token)) > 0)
+        {
+            stalled.CancelAfter(TimeSpan.FromSeconds(30));
+            written += read; if (written > maxBytes) throw new ApiException("这首歌曲超过离线缓存容量。");
+            await output.WriteAsync(buffer.AsMemory(0, read), ct); progress?.Report((written, total));
+        }
+        if (written == 0 || total.HasValue && total.Value != written) throw new ApiException("下载未完成，请重试。");
+    }
+    public async Task<string> CreatePlaylistAsync(string name, IEnumerable<string> songs)
+    {
+        var args = new List<(string Key, string Value)> { ("name", name) }; args.AddRange(songs.Select(id => ("songId", id)));
+        var root = await CallAsync("createPlaylist", default, args.ToArray());
+        return root.TryGetProperty("playlist", out var playlist) ? Text(playlist, "id") : "";
+    }
+    public Task<System.Text.Json.JsonElement> UpdatePlaylistAsync(string id, string? name = null, IEnumerable<string>? add = null, IEnumerable<int>? remove = null)
+    {
+        var args = new List<(string Key, string Value)> { ("playlistId", id) }; if (name != null) args.Add(("name", name));
+        if (add != null) args.AddRange(add.Select(song => ("songIdToAdd", song))); if (remove != null) args.AddRange(remove.Select(index => ("songIndexToRemove", index.ToString())));
+        return CallAsync("updatePlaylist", default, args.ToArray());
     }
     public void Dispose() => _http.Dispose();
 }

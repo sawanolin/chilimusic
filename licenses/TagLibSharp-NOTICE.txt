@@ -1,0 +1,15 @@
+TagLibSharp 2.3.0
+
+chilimusic uses the unmodified TagLibSharp library to read local music metadata,
+embedded cover art and lyrics. TagLibSharp.dll is distributed as a separate
+assembly and may be replaced with a compatible build.
+
+Project and corresponding source:
+https://github.com/mono/taglib-sharp
+https://github.com/mono/taglib-sharp/tree/TaglibSharp-2.3.0.0
+https://www.nuget.org/packages/TagLibSharp/2.3.0
+
+Copyright (c) 2006-2007 Brian Nickel; 2009-2020 other contributors.
+NuGet package license: GNU Lesser General Public License, version 2.1
+(LGPL-2.1-only).
+The license text is included in TagLibSharp-LGPL-2.1.txt.

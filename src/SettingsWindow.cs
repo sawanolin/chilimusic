@@ -4,9 +4,11 @@ namespace ChiliMusic;
 public partial class SettingsWindow : Window
 {
     private readonly PlayerViewModel _vm;
+    private readonly SettingsOptionsPanel _options;
     public SettingsWindow(PlayerViewModel vm)
     {
         InitializeComponent(); WindowAppearance.Attach(this); _vm = vm;
+        _options = new(vm); AdvancedOptions.Content = _options;
         ServerBox.Text = vm.Settings.Server; UsernameBox.Text = vm.Settings.Username; RememberCheck.IsChecked = vm.Settings.Remember; UntrustedCheck.IsChecked = vm.Settings.AllowUntrustedCertificate;
         StartupCheck.IsChecked = vm.Settings.StartWithWindows; TrayCheck.IsChecked = vm.Settings.StartInTray; CloseCheck.IsChecked = vm.Settings.CloseToTray; NotifyCheck.IsChecked = vm.Settings.NotifyTrack; ExclusiveCheck.IsChecked = vm.Settings.Exclusive; ThemeBox.SelectedIndex = vm.Settings.Theme switch { "Light" => 1, "Dark" => 2, _ => 0 };
     }
@@ -27,6 +29,7 @@ public partial class SettingsWindow : Window
             {
                 copy.Remember = RememberCheck.IsChecked == true; copy.ProtectedPassword = copy.Remember ? CredentialService.Protect(password) : null;
                 copy.StartWithWindows = StartupCheck.IsChecked == true; copy.StartInTray = TrayCheck.IsChecked == true; copy.CloseToTray = CloseCheck.IsChecked == true; copy.NotifyTrack = NotifyCheck.IsChecked == true; copy.Exclusive = ExclusiveCheck.IsChecked == true; copy.Theme = ThemeBox.SelectedIndex switch { 1 => "Light", 2 => "Dark", _ => "System" };
+                _options.Apply(copy);
                 if (copy.StartWithWindows != _vm.Settings.StartWithWindows) Store.SetStartup(copy.StartWithWindows);
                 _vm.UpdateSettings(copy, password); Close(); ((App)Application.Current).ShowMini();
             }

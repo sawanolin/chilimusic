@@ -78,8 +78,8 @@ public static class UiVerification
         vm.SaveQueue(); results["PersistedLocalQueue"] = Store.Read("queue.json", new QueueState()).Tracks.All(t => t.IsLocal); results["ServerConfigured"] = vm.Api.Configured; Store.Write("local-test.json", results); Theme.Apply(vm.Settings.Theme);
     }
     private static T? Find<T>(DependencyObject root) where T : DependencyObject => FindAll<T>(root).FirstOrDefault();
-    private static IEnumerable<T> FindAll<T>(DependencyObject root) where T : DependencyObject { for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) { var child = VisualTreeHelper.GetChild(root, i); if (child is T t) yield return t; foreach (var nested in FindAll<T>(child)) yield return nested; } }
-    private static void Capture(FrameworkElement window, string path)
+    internal static IEnumerable<T> FindAll<T>(DependencyObject root) where T : DependencyObject { for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) { var child = VisualTreeHelper.GetChild(root, i); if (child is T t) yield return t; foreach (var nested in FindAll<T>(child)) yield return nested; } }
+    internal static void Capture(FrameworkElement window, string path)
     {
         window.UpdateLayout(); var dpi = VisualTreeHelper.GetDpi(window); var bitmap = new RenderTargetBitmap((int)Math.Ceiling(window.ActualWidth * dpi.DpiScaleX), (int)Math.Ceiling(window.ActualHeight * dpi.DpiScaleY), dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32); bitmap.Render(window); var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); using var file = File.Create(path); encoder.Save(file);
     }

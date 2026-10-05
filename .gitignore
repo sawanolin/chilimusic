@@ -17,4 +17,7 @@ src/Resources/Fonts/*.ttf
 config.json
 queue.json
 local-library.json
+offline-cache.json
+playlists.json
+lyric-offsets.json
 *.log

@@ -35,6 +35,10 @@ public sealed class MpvPlayerService : IAudioPlayer
     [DllImport("mpv-2.dll", CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_set_property_string(IntPtr h, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, [MarshalAs(UnmanagedType.LPUTF8Str)] string value);
     [DllImport("mpv-2.dll", CallingConvention = CallingConvention.Cdecl)] private static extern IntPtr mpv_get_property_string(IntPtr h, [MarshalAs(UnmanagedType.LPUTF8Str)] string name);
     [DllImport("mpv-2.dll", CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_free(IntPtr p);
+    [StructLayout(LayoutKind.Explicit, Size = 16)] private struct Node { [FieldOffset(0)] public IntPtr Pointer; [FieldOffset(0)] public long Integer; [FieldOffset(0)] public double Number; [FieldOffset(8)] public int Format; }
+    [StructLayout(LayoutKind.Sequential)] private struct NodeList { public int Count; public IntPtr Values, Keys; }
+    [DllImport("mpv-2.dll", CallingConvention = CallingConvention.Cdecl)] private static extern int mpv_get_property(IntPtr h, [MarshalAs(UnmanagedType.LPUTF8Str)] string name, int format, out Node value);
+    [DllImport("mpv-2.dll", CallingConvention = CallingConvention.Cdecl)] private static extern void mpv_free_node_contents(ref Node node);
     [DllImport("mpv-2.dll", CallingConvention = CallingConvention.Cdecl)] private static extern ulong mpv_client_api_version();
     public string Version => Get("mpv-version");
     public void EnableDiagnostics() => mpv_request_log_messages(_handle, "trace");
@@ -45,6 +49,7 @@ public sealed class MpvPlayerService : IAudioPlayer
         {
             Option("config", "no"); Option("terminal", "no"); Option("msg-level", "all=no"); Option("vid", "no"); Option("idle", "yes"); Option("ytdl", "no"); Option("curl-enabled", "no");
             Option("ao", nullAudio ? "null" : "wasapi"); Option("audio-exclusive", settings.Exclusive ? "yes" : "no");
+            Option("audio-device", settings.AudioDevice); Option("replaygain", settings.ReplayGain); Option("replaygain-preamp", settings.ReplayGainPreamp.ToString(System.Globalization.CultureInfo.InvariantCulture)); Option("replaygain-clip", "no"); Option("prefetch-playlist", settings.PrefetchNext ? "yes" : "no");
             Option("tls-verify", settings.AllowUntrustedCertificate ? "no" : "yes"); Option("cache", "yes"); Option("cache-secs", "8"); Option("demuxer-max-bytes", "16777216");
             Option("demuxer-max-back-bytes", "4194304"); Option("network-timeout", "15"); Option("gapless-audio", "yes"); Option("volume", settings.Volume.ToString(System.Globalization.CultureInfo.InvariantCulture));
             Option("mute", settings.Mute ? "yes" : "no");
@@ -70,7 +75,24 @@ public sealed class MpvPlayerService : IAudioPlayer
         try { for (int i = 0; i < strings.Length; i++) Marshal.WriteIntPtr(array, i * IntPtr.Size, strings[i]); Marshal.WriteIntPtr(array, strings.Length * IntPtr.Size, IntPtr.Zero); if (mpv_command(_handle, array) < 0) throw new InvalidOperationException("播放器命令执行失败。"); }
         finally { Marshal.FreeHGlobal(array); foreach (var p in strings) Marshal.FreeCoTaskMem(p); }
     }
-    public void Load(string url, double start = 0) { Set("start", start.ToString(System.Globalization.CultureInfo.InvariantCulture)); Command("loadfile", url, "replace"); Set("pause", "no"); }
+    public void Load(string url, double start = 0) { Command("loadfile", url, "replace", "-1", "start=" + start.ToString(System.Globalization.CultureInfo.InvariantCulture)); Set("pause", "no"); }
+    public void PrepareNext(string? url) { Command("playlist-clear"); if (url != null) Command("loadfile", url, "append", "-1", "start=0"); }
+    public IReadOnlyList<AudioDevice> AudioDevices()
+    {
+        var devices = new List<AudioDevice> { new("auto", "系统默认输出") };
+        if (mpv_get_property(_handle, "audio-device-list", 6, out var node) < 0) return devices;
+        try { if (ReadNode(node) is List<object?> rows) foreach (var row in rows.OfType<Dictionary<string, object?>>()) if (row.TryGetValue("name", out var name) && name is string id && id.StartsWith("wasapi/", StringComparison.Ordinal)) devices.Add(new(id, row.GetValueOrDefault("description") as string ?? id)); }
+        finally { mpv_free_node_contents(ref node); }
+        return devices;
+    }
+    private static object? ReadNode(Node node)
+    {
+        if (node.Format == 1) return Marshal.PtrToStringUTF8(node.Pointer); if (node.Format == 3) return node.Integer != 0; if (node.Format == 4) return node.Integer; if (node.Format == 5) return node.Number;
+        if (node.Format is not (7 or 8) || node.Pointer == IntPtr.Zero) return null;
+        var list = Marshal.PtrToStructure<NodeList>(node.Pointer); if (list.Count is < 0 or > 10000) return null;
+        if (node.Format == 7) { var array = new List<object?>(); for (int i = 0; i < list.Count; i++) array.Add(ReadNode(Marshal.PtrToStructure<Node>(IntPtr.Add(list.Values, i * 16)))); return array; }
+        var map = new Dictionary<string, object?>(); for (int i = 0; i < list.Count; i++) map[Marshal.PtrToStringUTF8(Marshal.ReadIntPtr(list.Keys, i * IntPtr.Size)) ?? ""] = ReadNode(Marshal.PtrToStructure<Node>(IntPtr.Add(list.Values, i * 16))); return map;
+    }
     public void Pause() => Set("pause", "yes"); public void Resume() => Set("pause", "no"); public void Stop() => Command("stop");
     public void Seek(double seconds) => Command("seek", Math.Max(0, seconds).ToString(System.Globalization.CultureInfo.InvariantCulture), "absolute+exact");
     private void EventLoop()

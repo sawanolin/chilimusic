@@ -18,3 +18,5 @@ global using Binding = System.Windows.Data.Binding;
 global using ColorConverter = System.Windows.Media.ColorConverter;
 global using DataObject = System.Windows.DataObject;
 global using DragDropEffects = System.Windows.DragDropEffects;
+global using HorizontalAlignment = System.Windows.HorizontalAlignment;
+global using SelectionMode = System.Windows.Controls.SelectionMode;

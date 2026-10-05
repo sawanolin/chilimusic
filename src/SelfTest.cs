@@ -7,6 +7,7 @@ public static class SelfTest
     {
         var settings = Store.Read("config.json", new AppSettings()); var password = CredentialService.Unprotect(settings.ProtectedPassword);
         using var api = new NavidromeApiClient(settings, password); var report = new Dictionary<string, object>();
+        if (args.Contains("--features")) { await FeatureVerification.RunCoreAsync(api, settings); return; }
         if (args.Contains("--stress")) { await StressAsync(api, settings); return; }
         void Record(string name, object result) { report[name] = result; Store.Write("selftest.json", report); }
         string marker = "test-password-非ASCII"; if (CredentialService.Unprotect(CredentialService.Protect(marker)) != marker) throw new Exception("DPAPI roundtrip failed"); Record("DPAPI", "PASS");

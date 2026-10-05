@@ -16,9 +16,14 @@ public static class Store
     }
     public static void Write<T>(string name, T value)
     {
+        lock (WriteLock)
+        {
         Directory.CreateDirectory(Root); var path = Path.Combine(Root, name); var tmp = path + ".tmp";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(tmp, JsonSerializer.Serialize(value, JsonOptions)); File.Move(tmp, path, true);
+        }
     }
+    private static readonly object WriteLock = new();
     private static readonly object LogLock = new();
     public static void Log(string level, string message)
     {

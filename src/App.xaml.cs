@@ -12,6 +12,7 @@ public partial class App : Application
     private TaskbarService? _taskbar; private System.Windows.Forms.ContextMenuStrip? _trayMenu;
     private FunctionKeyService? _functionKeys;
     private MiniPlayerWindow? _mini; private MainWindow? _main; private SettingsWindow? _settingsWindow;
+    private MusicToolsWindow? _tools; private DesktopLyricsWindow? _desktopLyrics;
     public PlayerViewModel Vm { get; private set; } = null!;
     public bool Exiting { get; private set; }
     private string InstanceName => "ChiliMusic-" + WindowsIdentity.GetCurrent().User!.Value;
@@ -28,8 +29,9 @@ public partial class App : Application
             try { password = CredentialService.Unprotect(settings.ProtectedPassword); } catch { Store.Log("WARNING", "无法解密已有账户，请重新登录。"); }
             NativeFonts.Initialize(); Theme.Apply(settings.Theme); Vm = new(settings, password); _mini = new(Vm); new WindowInteropHelper(_mini).EnsureHandle();
             try { Vm.Media = new(new WindowInteropHelper(_mini).Handle); Vm.Media.ButtonPressed += button => Dispatcher.BeginInvoke(() => OnMedia(button)); } catch (Exception ex) { Vm.Status = "系统媒体控制初始化失败"; Store.Log("ERROR", $"SMTC 初始化失败 {ex.GetType().Name}"); }
-            CreateTray(); _taskbar = new(Vm, this); Store.Write("taskbar-diagnostics.json", _taskbar.Diagnostics()); _functionKeys = new(Vm); SystemEvents.UserPreferenceChanged += OnPreferences; _ = ListenAsync();
-            if (e.Args.Contains("--qa-layout")) Vm.Run(() => UiVerification.RunLayoutAsync(this, _taskbar, e.Args.Skip(1).ToArray()));
+            CreateTray(); _taskbar = new(Vm, this); Vm.SettingsChanged += OnSettingsChanged; Store.Write("taskbar-diagnostics.json", _taskbar.Diagnostics()); _functionKeys = new(Vm); SystemEvents.UserPreferenceChanged += OnPreferences; _ = ListenAsync();
+            if (e.Args.Contains("--qa-features")) Vm.Run(() => FeatureUiVerification.RunAsync(this, _taskbar, e.Args.Contains("--qa-quick")));
+            else if (e.Args.Contains("--qa-layout")) Vm.Run(() => UiVerification.RunLayoutAsync(this, _taskbar, e.Args.Skip(1).ToArray()));
             else if (e.Args.Contains("--qa-local")) Vm.Run(() => UiVerification.RunLocalAsync(this, e.Args.Skip(1).ToArray()));
             else if (Vm.Api.Configured) { if (e.Args.Contains("--qa-ui")) Vm.Run(() => UiVerification.RunAsync(this, _taskbar)); else { Vm.Run(Vm.ConnectAsync); if (!settings.StartInTray) ShowMain(); } } else ShowMain();
         }
@@ -44,7 +46,7 @@ public partial class App : Application
         void Item(string title, Action action) { menu.Items.Add(title, null, (_, _) => Dispatcher.Invoke(action)); }
         Item("播放 / 暂停", () => Vm.Run(Vm.ToggleAsync)); Item("上一首", () => Vm.Run(Vm.PreviousAsync)); Item("下一首", () => Vm.Run(() => Vm.NextAsync(false))); menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         Item("随机播放全部", () => Vm.Run(() => Vm.RandomAsync(false))); Item("随机播放收藏", () => Vm.Run(() => Vm.RandomAsync(true))); menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
-        Item("显示播放器", ShowMini); Item("搜索", () => ShowMain(false, true)); Item("打开本地音乐…", () => { ShowMain(); _main!.OpenLocalFiles(); }); Item("设置", ShowSettings); Item("退出", Exit); _tray.ContextMenuStrip = menu;
+        Item("显示播放器", ShowMini); Item("搜索", () => ShowMain(false, true)); Item("打开本地音乐…", () => { ShowMain(); _main!.OpenLocalFiles(); }); Item("歌词与歌单", () => ShowTools("歌词")); Item("桌面歌词", ToggleDesktopLyrics); Item("解锁桌面歌词", () => _desktopLyrics?.Unlock()); Item("离线下载", () => ShowTools("离线")); Item("定时停止", () => ShowTools("定时")); Item("设置", ShowSettings); Item("退出", Exit); _tray.ContextMenuStrip = menu;
         _trayClick.Interval = TimeSpan.FromMilliseconds(System.Windows.Forms.SystemInformation.DoubleClickTime); _trayClick.Tick += (_, _) => { _trayClick.Stop(); if (_mini!.IsVisible) _mini.Hide(); else ShowMini(); };
         _tray.MouseClick += (_, args) => { if (args.Button == System.Windows.Forms.MouseButtons.Left) _trayClick.Start(); };
         _tray.MouseDoubleClick += (_, args) => { if (args.Button == System.Windows.Forms.MouseButtons.Left) { _trayClick.Stop(); ShowMain(); } };
@@ -72,10 +74,23 @@ public partial class App : Application
         _mini?.Hide(); bool created = _main == null; _main ??= new(Vm); _main.Show(); _main.WindowState = WindowState.Normal; _main.Activate(); if (created) Vm.Run(() => Vm.BrowseAsync(Vm.Api.Configured ? "最近添加" : "本地音乐")); if (queue) _main.FocusQueue(); if (search) _main.FocusSearch();
     }
     public void ShowSettings() { _mini?.Hide(); if (_settingsWindow != null) { _settingsWindow.Activate(); return; } _settingsWindow = new(Vm); _settingsWindow.Closed += (_, _) => _settingsWindow = null; _settingsWindow.Show(); }
+    private void OnSettingsChanged() => _taskbar?.Refresh();
+    public void ShowTools(string tab, IEnumerable<Track>? selection = null)
+    {
+        if (selection != null && _tools != null) _tools.Close();
+        if (_tools == null) { _tools = new(Vm, tab, selection); _tools.Closed += (_, _) => _tools = null; }
+        _tools.SelectTab(tab); _tools.Show(); _tools.Activate();
+    }
+    public void ToggleDesktopLyrics()
+    {
+        if (_desktopLyrics != null) { _desktopLyrics.Close(); return; }
+        _desktopLyrics = new(Vm); _desktopLyrics.Closed += (_, _) => _desktopLyrics = null; _desktopLyrics.Show();
+    }
     public void NotifyTrack(Track track) { if (Vm.Settings.NotifyTrack) _tray?.ShowBalloonTip(3000, track.Title, track.Artist, System.Windows.Forms.ToolTipIcon.None); }
     public new void Exit()
     {
         if (Exiting) return; Exiting = true; _exitCts.Cancel(); _trayClick.Stop(); SystemEvents.UserPreferenceChanged -= OnPreferences;
+        if (Vm != null) Vm.SettingsChanged -= OnSettingsChanged;
         _functionKeys?.Dispose(); _taskbar?.Dispose(); _tray?.Dispose(); _icon?.Dispose(); NativeFonts.Dispose(); try { Vm?.Dispose(); } catch (Exception e) { Store.Log("ERROR", $"退出保存失败 {e.GetType().Name}"); }
         Shutdown();
     }

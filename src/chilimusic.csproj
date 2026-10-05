@@ -12,7 +12,7 @@
     <AssemblyName>chilimusic</AssemblyName>
     <ApplicationIcon>Resources/player.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <Product>chilimusic</Product>
     <Description>本地音乐与 Navidrome 播放器</Description>
@@ -20,6 +20,7 @@
     <Company>Chili</Company>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="TagLibSharp" Version="2.3.0" />
     <Content Include="Native/mpv-2.dll" CopyToOutputDirectory="PreserveNewest" Link="mpv-2.dll" />
     <Resource Include="Resources/player.ico" />
     <Resource Include="Resources/chilimusic.png" />

@@ -41,13 +41,25 @@ begin
     HasFramework(Root, 'Microsoft.WindowsDesktop.App', 'PresentationFramework.dll');
 end;
 
+function SelectDesktopRuntimeRoot(const X64Root, CommonRoot, RegisteredRoot, DefaultRoot: String): String;
+begin
+  { Match the .NET 8 apphost's search order; a chosen root is not combined
+    with frameworks from a different installation. }
+  if (X64Root <> '') and DirExists(X64Root) then Result := X64Root
+  else if (CommonRoot <> '') and DirExists(CommonRoot) then Result := CommonRoot
+  else if RegisteredRoot <> '' then Result := RegisteredRoot
+  else Result := DefaultRoot;
+end;
+
 function DesktopRuntimeInstalled: Boolean;
 var
   Location: String;
 begin
-  Result := False;
-  if RegQueryStringValue(HKLM64, 'SOFTWARE\dotnet\Setup\InstalledVersions\x64',
-    'InstallLocation', Location) then
-    Result := HasDesktopRuntimeAt(Location);
-  if not Result then Result := HasDesktopRuntimeAt(ExpandConstant('{pf64}\dotnet'));
+  Location := '';
+  { .NET registers x64 InstallLocation in the 32-bit registry view. }
+  RegQueryStringValue(HKLM32, 'SOFTWARE\dotnet\Setup\InstalledVersions\x64',
+    'InstallLocation', Location);
+  Location := SelectDesktopRuntimeRoot(GetEnv('DOTNET_ROOT_X64'), GetEnv('DOTNET_ROOT'),
+    Location, ExpandConstant('{pf64}\dotnet'));
+  Result := HasDesktopRuntimeAt(Location);
 end;

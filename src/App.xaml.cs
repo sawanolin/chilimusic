@@ -29,7 +29,7 @@ public partial class App : Application
         if (e.Args.Contains("--qa-netease-network")) { await NeteaseVerification.NetworkAsync(); Shutdown(); return; }
         if (e.Args.Contains("--allow-remote") || e.Args.Contains("--allow-remote-public")) { bool allowed = RemoteFirewall.Allow(e.Args.Contains("--allow-remote-public")); if (!allowed) MessageBox.Show("未能添加连接规则，请在 Windows 防火墙中允许 chilimusic 通过专用网络。", "chilimusic"); Shutdown(allowed ? 0 : 1); return; }
         if (e.Args.Contains("--self-test")) { try { await SelfTest.RunAsync(e.Args); Shutdown(0); } catch (Exception error) { Store.Write("selftest-failure.json", new { Error = error.GetType().Name, Message = error is ApiException ? error.Message : "验收失败" }); Shutdown(1); } return; }
-        if (e.Args.Contains("--qa-remote") || e.Args.Contains("--qa-quality") || e.Args.Contains("--qa-netease-ui") || e.Args.Contains("--qa-netease-full")) { FeatureVerification.RequireIsolatedProfile(); _remoteQa = true; }
+        if (e.Args.Contains("--qa-remote") || e.Args.Contains("--qa-quality") || e.Args.Contains("--qa-immersive") || e.Args.Contains("--qa-netease-ui") || e.Args.Contains("--qa-netease-full")) { FeatureVerification.RequireIsolatedProfile(); _remoteQa = true; }
         _mutex = new Mutex(true, @"Local\" + InstanceName, out _ownsMutex);
         if (!_ownsMutex) { try { using var pipe = new NamedPipeClientStream(".", InstanceName, PipeDirection.Out); await pipe.ConnectAsync(2000); await pipe.WriteAsync(new byte[] { 1 }); } catch (IOException) { } catch (TimeoutException) { } Shutdown(); return; }
         DispatcherUnhandledException += (_, args) => { Store.Log("ERROR", $"UI 异常 {args.Exception.GetType().Name}"); if (Vm != null) Vm.Status = "操作发生异常，请重试。"; args.Handled = true; };
@@ -45,13 +45,26 @@ public partial class App : Application
             if (e.Args.Contains("--qa-netease-full")) Vm.Run(() => NeteaseVerification.FullAsync(this));
             else if (e.Args.Contains("--qa-netease-ui")) Vm.Run(() => NeteaseVerification.UiAsync(this));
             else if (e.Args.Contains("--qa-quality")) Vm.Run(() => UiVerification.RunQualityAsync(this));
+            else if (e.Args.Contains("--qa-immersive")) Vm.Run(() => ImmersiveVerification.RunAsync(this));
             else if (_remoteQa) Vm.Run(() => RemoteVerification.RunAsync(this, _taskbar));
             else if (e.Args.Contains("--qa-features")) Vm.Run(() => FeatureUiVerification.RunAsync(this, _taskbar, e.Args.Contains("--qa-quick")));
             else if (e.Args.Contains("--qa-layout")) Vm.Run(() => UiVerification.RunLayoutAsync(this, _taskbar, e.Args.Skip(1).ToArray()));
             else if (e.Args.Contains("--qa-local")) Vm.Run(() => UiVerification.RunLocalAsync(this, e.Args.Skip(1).ToArray()));
             else if (Vm.Api.Configured) { if (e.Args.Contains("--qa-ui")) Vm.Run(() => UiVerification.RunAsync(this, _taskbar)); else { Vm.Run(Vm.ConnectAsync); if (!settings.StartInTray) ShowMain(); } } else ShowMain();
         }
-        catch (Exception ex) { Store.Log("ERROR", $"启动失败 {ex.GetType().Name}"); MessageBox.Show("播放器无法启动。请确认 mpv-2.dll 与 EXE 在同一目录，以及已安装 .NET 8 Desktop Runtime。\n" + ex.GetType().Name, "chilimusic"); Exit(); }
+        catch (Exception ex)
+        {
+            Store.Log("ERROR", $"启动失败 {ex.GetType().Name}");
+            if (e.Args.Any(arg => arg.StartsWith("--qa", StringComparison.Ordinal))) { Store.Write("startup-failure.json", new { ex.Message, ex.StackTrace }); Exit(); return; }
+            string reason = ex switch
+            {
+                DllNotFoundException => "缺少播放引擎。请确认 mpv-2.dll 与 chilimusic.exe 在同一目录。",
+                BadImageFormatException => "播放引擎版本不匹配，请使用完整的 x64 版本。",
+                InvalidOperationException => ex.Message,
+                _ => "启动时发生错误，请重新打开播放器。"
+            };
+            MessageBox.Show("播放器无法启动。\n" + reason, "chilimusic"); Exit();
+        }
     }
     private void OnPreferences(object sender, UserPreferenceChangedEventArgs e) { if (!Exiting && Vm != null) Dispatcher.BeginInvoke(() => { Theme.Apply(Vm.Settings.Theme); _taskbar?.Refresh(); }); }
     private void CreateTray()

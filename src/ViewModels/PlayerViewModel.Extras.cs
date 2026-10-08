@@ -9,6 +9,7 @@ public sealed partial class PlayerViewModel
     public List<LyricsDocument> LyricDocuments { get; private set; } = [];
     public event Action<LyricLine?>? ActiveLyricChanged;
     private LyricLine? _activeLyric;
+    private int _lyricsRequest;
     private readonly Dictionary<string, double> _lyricOffsets = Store.Read("lyric-offsets.json", new Dictionary<string, double>());
     private double _lyricOffset;
     public string LyricText => _activeLyric?.Text ?? (LyricLines.Count == 0 ? "暂无歌词" : LyricLines.Any(l => l.Time != null) ? Title : LyricLines[0].Text);
@@ -16,6 +17,7 @@ public sealed partial class PlayerViewModel
     public string TranslationText => _activeLyric?.Translation ?? "";
     private bool _showLyricTranslation = true;
     public bool ShowLyricTranslation { get => _showLyricTranslation; set { _showLyricTranslation = value; Changed(); } }
+    public bool HasLyricTranslation => LyricLines.Any(line => !string.IsNullOrWhiteSpace(line.Translation));
     public int LyricDocumentIndex { get; private set; }
     public int LyricsRevision { get; private set; }
     public double LyricOffset { get => _lyricOffset; set { _lyricOffset = Math.Clamp(value, -60, 60); if (Current != null) { _lyricOffsets[Api.ScopeForId(Current.Id) + "\0" + Current.Id] = _lyricOffset; Store.Write("lyric-offsets.json", _lyricOffsets); } Changed(); UpdateLyricPosition(); } }
@@ -29,11 +31,12 @@ public sealed partial class PlayerViewModel
     private void ClearLyrics() { _activeLyric = null; LyricLines.Clear(); LyricDocuments = []; LyricsRevision++; LyricsStatus = "正在加载歌词…"; NextLyricText = ""; Changed(nameof(LyricDocuments)); Changed(nameof(LyricsStatus)); Changed(nameof(LyricText)); Changed(nameof(TranslationText)); Changed(nameof(NextLyricText)); }
     private async Task LoadLyricsAsync(Track track, int generation, CancellationToken ct)
     {
+        int request = ++_lyricsRequest;
         List<LyricsDocument> documents;
         try { documents = await Lyrics.LoadAsync(track, ct); }
         catch (OperationCanceledException) { return; }
         catch (Exception error) { documents = []; Store.Log("WARNING", $"歌词加载失败 {error.GetType().Name}"); }
-        if (generation != _generation || ct.IsCancellationRequested) return;
+        if (generation != _generation || request != _lyricsRequest || ct.IsCancellationRequested) return;
         LyricDocuments = documents; _lyricOffset = _lyricOffsets.GetValueOrDefault(Api.ScopeForId(track.Id) + "\0" + track.Id); Changed(nameof(LyricOffset)); Changed(nameof(LyricDocuments));
         SetLyricDocument(0);
     }
@@ -48,11 +51,12 @@ public sealed partial class PlayerViewModel
         }
         LyricsStatus = LyricLines.Count == 0 ? "暂无歌词" : LyricLines.Any(l => l.Time != null) ? "同步歌词" : "文本歌词";
         if (index >= 0 && index < LyricDocuments.Count && LyricDocuments[index].Source.Length > 0) LyricsStatus += " · " + LyricDocuments[index].Source;
-        Changed(nameof(LyricDocumentIndex)); Changed(nameof(TranslationText));
+        Changed(nameof(LyricDocumentIndex)); Changed(nameof(TranslationText)); Changed(nameof(HasLyricTranslation));
         Changed(nameof(LyricsStatus)); Changed(nameof(LyricText)); NextLyricText = ""; Changed(nameof(NextLyricText)); UpdateLyricPosition();
     }
     public async Task ImportLyricsAsync(string file)
     {
+        ++_lyricsRequest;
         var current = Current; int generation = _generation; if (current == null) throw new ApiException("请先选择一首歌曲。");
         if (new FileInfo(file).Length > 1024 * 1024) throw new ApiException("歌词文件超过 1 MB。");
         string text = await LyricsService.ReadTextAsync(file, default); if (generation != _generation) throw new ApiException("歌曲已切换，请重新导入歌词。"); var document = LyricsService.Parse(text); LyricDocuments = [document]; SetLyricDocument(0); Changed(nameof(LyricDocuments));
@@ -68,8 +72,9 @@ public sealed partial class PlayerViewModel
     }
     public async Task ApplyLyricsMatchAsync(Track match)
     {
+        int request = ++_lyricsRequest;
         var current = Current; int generation = _generation; if (current == null) throw new ApiException("请先播放一首歌曲。");
-        var docs = await Lyrics.ApplyMatchAsync(current, match, _playCts.Token); if (generation != _generation) return;
+        var docs = await Lyrics.ApplyMatchAsync(current, match, _playCts.Token); if (generation != _generation || request != _lyricsRequest) return;
         LyricDocuments = docs; Changed(nameof(LyricDocuments)); SetLyricDocument(0);
     }
     private void OnNeteaseAccountChanged()

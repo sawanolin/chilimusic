@@ -19,7 +19,7 @@ public sealed class LyricsService(NavidromeApiClient api)
     public string CachePath(Track track) => Path.Combine(Store.Root, "cache", "lyrics", Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(api.ScopeForId(track.Id) + "\0" + track.Id))) + ".lrc");
     public async Task<List<LyricsDocument>> ApplyMatchAsync(Track original, Track match, CancellationToken ct)
     {
-        if (api is not MusicApiClient music || !music.Netease.LoggedIn) throw new ApiException("请先扫码登录网易云音乐。");
+        if (api is not MusicApiClient music) throw new ApiException("当前无法匹配网易云歌词。");
         var documents = await music.Netease.LyricsAsync(match.Id, ct); if (!documents.Any(d => d.Lines.Any(l => !string.IsNullOrWhiteSpace(l.Text)))) throw new ApiException("这首歌曲没有可用歌词，请选择其他版本。");
         documents = documents.Select(d => d with { Source = "网易云 · " + match.Artist + " · " + match.Title }).ToList(); Store.Write(CachePath(original) + ".match.json", documents); return documents;
     }
@@ -38,9 +38,10 @@ public sealed class LyricsService(NavidromeApiClient api)
             return await SupplementAsync(track, cached, ct);
         }
         if (track.IsNetease && api is MusicApiClient music) { var documents = await music.Netease.LyricsAsync(track.Id, ct); if (documents.Count > 0) Store.Write(cached, documents); return documents; }
+        if (api is MusicApiClient disconnected && !disconnected.NavidromeConfigured) return await SupplementAsync(track, cached, ct);
         try
         {
-            var root = await api.CallAsync("getLyricsBySongId", ct, ("id", track.Id)); var documents = new List<LyricsDocument>();
+            var root = api is MusicApiClient sources ? await sources.CallSourceAsync("server", "getLyricsBySongId", ct, ("id", track.Id)) : await api.CallAsync("getLyricsBySongId", ct, ("id", track.Id)); var documents = new List<LyricsDocument>();
             if (root.TryGetProperty("lyricsList", out var list) && list.TryGetProperty("structuredLyrics", out var lyrics))
                 foreach (var item in lyrics.EnumerateArray())
                 {
@@ -56,7 +57,7 @@ public sealed class LyricsService(NavidromeApiClient api)
     }
     private async Task<List<LyricsDocument>> SupplementAsync(Track track, string cached, CancellationToken ct)
     {
-        if (api is not MusicApiClient music || !music.Settings.NeteaseLyrics || !music.Netease.LoggedIn) return [];
+        if (api is not MusicApiClient music || !music.Settings.NeteaseLyrics) return [];
         try
         {
             var match = await music.Netease.MatchLyricsAsync(track, ct); if (match == null) return [];

@@ -15,6 +15,17 @@ public sealed partial class NeteaseClient
     }
     public async Task<string> ResolveUrlAsync(Track track, string quality, bool mp3, CancellationToken ct)
     {
+        if (mp3 || quality != "auto") return await ResolveLevelAsync(track, quality, mp3, ct);
+        string? preview = null; ApiException? unavailable = null;
+        foreach (string level in new[] { "hires", "lossless", "exhigh" })
+        {
+            try { var url = await ResolveLevelAsync(track, level, false, ct); if (!track.Preview || level == "exhigh") return url; preview = url; }
+            catch (ApiException error) when (error.Message.StartsWith("这首网易云歌曲暂不可播放") || error.Message.StartsWith("网易云没有提供")) { unavailable = error; }
+        }
+        return preview ?? throw unavailable ?? new ApiException("这首网易云歌曲暂不可播放。");
+    }
+    private async Task<string> ResolveLevelAsync(Track track, string quality, bool mp3, CancellationToken ct)
+    {
         string id = RawId(track.Id); string level = mp3 ? "exhigh" : quality is "standard" or "higher" or "exhigh" or "lossless" or "hires" ? quality : "exhigh";
         string key = UserId + ":" + id + ":" + level;
         if (!_addresses.TryGetValue(key, out var address) || address.Expires <= DateTime.UtcNow)

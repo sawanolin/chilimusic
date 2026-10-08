@@ -52,7 +52,7 @@ public sealed record AudioField(string Label, string Value);
 public sealed class AppSettings
 {
     public string CatalogSource { get; set; } = "navidrome";
-    public string NeteaseQuality { get; set; } = "exhigh";
+    public string NeteaseQuality { get; set; } = "auto";
     public bool NeteaseLyrics { get; set; } = true;
     public string Server { get; set; } = "";
     public string Username { get; set; } = "";

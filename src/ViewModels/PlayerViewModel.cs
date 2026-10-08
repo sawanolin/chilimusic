@@ -14,7 +14,7 @@ public sealed class RelayCommand(Action action) : ICommand
 public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposable
 {
     public event PropertyChangedEventHandler? PropertyChanged;
-    public void Changed([CallerMemberName] string? name = null) { PropertyChanged?.Invoke(this, new(name)); if (name == nameof(PlayGlyph)) PropertyChanged?.Invoke(this, new(nameof(PlayIcon))); if (name == nameof(Position)) PropertyChanged?.Invoke(this, new(nameof(PositionText))); if (name == nameof(Duration)) PropertyChanged?.Invoke(this, new(nameof(DurationText))); }
+    public void Changed([CallerMemberName] string? name = null) { PropertyChanged?.Invoke(this, new(name)); if (name == nameof(PlayGlyph)) { PropertyChanged?.Invoke(this, new(nameof(PlayIcon))); Changed(nameof(IsProgressMoving)); } if (name == nameof(Position)) PropertyChanged?.Invoke(this, new(nameof(PositionText))); if (name == nameof(Duration)) PropertyChanged?.Invoke(this, new(nameof(DurationText))); }
     public AppSettings Settings { get; }
     public MusicApiClient Api { get; }
     public string CatalogSource { get => Settings.CatalogSource; set { value = value == "netease" ? "netease" : "navidrome"; if (value == Settings.CatalogSource) return; Settings.CatalogSource = value; SaveSettings(); Changed(); Changed(nameof(IsNeteaseCatalog)); Changed(nameof(ServerConfigured)); Changed(nameof(CatalogName)); _beforeSearch = null; Run(() => BrowseAsync("最近添加")); } }
@@ -58,6 +58,8 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     private static string Clock(double n) => TimeSpan.FromSeconds(Math.Max(0, n)).ToString(n >= 3600 ? @"h\:mm\:ss" : @"m\:ss");
     public string PlayGlyph => MobileOutput ? MobilePlaying ? "Ⅱ" : "▶" : Player.IsIdle || Player.IsPaused ? "▶" : "Ⅱ";
     public string PlayIcon => PlayGlyph == "▶" ? "\uE768" : "\uE769";
+    public bool IsProgressMoving => MobileOutput ? MobilePlaying : _loaded && !Player.IsIdle && !Player.IsPaused && Player.Get("paused-for-cache") != "yes";
+    private bool _progressMoving;
     public string ModeIcon => Settings.Mode switch { PlayMode.Shuffle => "\uE8B1", PlayMode.RepeatOne => "\uE8ED", PlayMode.RepeatAll => "\uE8EE", _ => "\uE72A" };
     public string ModeText => Settings.Mode switch { PlayMode.RepeatAll => "列表循环", PlayMode.RepeatOne => "单曲循环", PlayMode.Shuffle => "随机播放", _ => "顺序播放" };
     public double Volume { get => Settings.Volume; set { Settings.Volume = Math.Clamp(value, 0, 100); Player.Volume = Settings.Volume; Changed(); SaveSettingsSoon(); } }
@@ -211,7 +213,9 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         bool paused = Player.IsPaused; bool idle = Player.IsIdle; Media?.Status(idle, paused);
         if (!paused && !idle && Player.Get("paused-for-cache") != "yes") _listened += Math.Min(elapsed, 2);
         if (!Current.IsLocal && !_submitted && Duration > 0 && _listened >= Math.Min(Duration / 2, 240)) { _submitted = true; var id = Current.Id; Run(() => ScrobbleQuietlyAsync(id, true)); }
-        _timer.Interval = TimeSpan.FromMilliseconds(paused ? 1500 : Application.Current.Windows.Cast<Window>().Any(w => w.IsVisible) ? 250 : 1000);
+        bool moving = !paused && !idle && Player.Get("paused-for-cache") != "yes";
+        if (moving != _progressMoving) { _progressMoving = moving; Changed(nameof(IsProgressMoving)); }
+        _timer.Interval = TimeSpan.FromMilliseconds(paused ? 500 : Application.Current.Windows.Cast<Window>().Any(w => w.IsVisible) ? 50 : 250);
     }
     public async Task ToggleAsync()
     {
@@ -220,7 +224,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         else if (Player.IsPaused) Player.Resume(); else Player.Pause(); Changed(nameof(PlayGlyph)); Media?.Status(Player.IsIdle, Player.IsPaused);
     }
     public void Stop() { if (MobileOutput) SeekRevision++; MobilePlaying = false; CancelPrepared(); _playCts.Cancel(); _loaded = false; _reconnecting = false; _timer.Stop(); Player.Stop(); Position = 0; _restorePosition = 0; Offline.ProtectedPath = null; Changed(nameof(PlayGlyph)); Media?.Status(true, false); Status = "已停止"; SaveQueue(); }
-    public void Seek(double position) { SeekRevision++; if (MobileOutput) { Position = Math.Clamp(position, 0, Duration); SaveQueue(); } else if (!Player.IsIdle) { Player.Seek(position); Position = position; SaveQueue(); } }
+    public void Seek(double position) { SeekRevision++; if (MobileOutput) { Position = Math.Clamp(position, 0, Duration); UpdateLyricPosition(); SaveQueue(); } else if (!Player.IsIdle) { Player.Seek(position); Position = position; UpdateLyricPosition(); SaveQueue(); } }
     public async Task NextAsync(bool automatic)
     {
         if (automatic && _stopAfterCurrent) { CancelSleep(); Stop(); return; }

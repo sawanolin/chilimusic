@@ -6,7 +6,6 @@ public sealed partial class NeteaseClient
 {
     public async Task<List<Track>> SearchLyricsAsync(string query, CancellationToken ct)
     {
-        await EnsureAccountAsync(ct);
         if (string.IsNullOrWhiteSpace(query) || query.Length > 120) return [];
         var root = await RequestAsync("/api/cloudsearch/pc", new() { ["s"] = query, ["type"] = 1, ["limit"] = 30, ["offset"] = 0, ["total"] = true }, ct);
         return root.TryGetProperty("result", out var result) ? Rows(result, "songs").Select(Song).ToList() : [];
@@ -22,5 +21,5 @@ public sealed partial class NeteaseClient
         if (sameAlbum.Count == 1) return sameAlbum[0];
         return matches.Count == 1 ? matches[0] : null;
     }
-    public async Task<Track?> MatchLyricsAsync(Track track, CancellationToken ct) => !LoggedIn ? null : ChooseLyricsMatch(track, await SearchLyricsAsync((track.Title + " " + track.Artist).Trim()[..Math.Min(120, (track.Title + " " + track.Artist).Trim().Length)], ct));
+    public async Task<Track?> MatchLyricsAsync(Track track, CancellationToken ct) => ChooseLyricsMatch(track, await SearchLyricsAsync((track.Title + " " + track.Artist).Trim()[..Math.Min(120, (track.Title + " " + track.Artist).Trim().Length)], ct));
 }

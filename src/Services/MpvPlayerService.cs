@@ -52,7 +52,12 @@ public sealed class MpvPlayerService : IAudioPlayer
             if (WindowsTlsCertificates.BundlePath() is { } certificates) Option("tls-ca-file", certificates);
             Option("audio-device", settings.AudioDevice); Option("replaygain", settings.ReplayGain); Option("replaygain-preamp", settings.ReplayGainPreamp.ToString(System.Globalization.CultureInfo.InvariantCulture)); Option("replaygain-clip", "no"); Option("prefetch-playlist", settings.PrefetchNext ? "yes" : "no");
             Option("tls-verify", settings.AllowUntrustedCertificate ? "no" : "yes"); Option("cache", "yes"); Option("cache-secs", "8"); Option("demuxer-max-bytes", "16777216");
-            Option("demuxer-max-back-bytes", "4194304"); Option("network-timeout", "15"); Option("gapless-audio", "yes"); Option("volume", settings.Volume.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            // Reopen the output when the next track's format changes instead of retaining
+            // the first track's sample rate across a mixed-resolution playlist.
+            Option("gapless-audio", "weak");
+            // Optional tuning must not prevent startup with a different libmpv build.
+            if (mpv_set_option_string(_handle, "audio-swresample-o", "filter_size=64,phase_shift=10") < 0) Store.Log("WARNING", "当前音频引擎使用默认重采样设置。");
+            Option("demuxer-max-back-bytes", "4194304"); Option("network-timeout", "15"); Option("volume", settings.Volume.ToString(System.Globalization.CultureInfo.InvariantCulture));
             Option("mute", settings.Mute ? "yes" : "no");
             if (mpv_initialize(_handle) < 0) throw new InvalidOperationException("libmpv 初始化失败。");
         }

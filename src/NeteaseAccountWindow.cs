@@ -28,9 +28,10 @@ internal sealed class NeteaseAccountWindow : DialogShell
         var qrBox = new Border { Padding = new Thickness(10), Background = Brushes.White, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 8), Child = _qr };
         _status.TextAlignment = TextAlignment.Center;
         _qrCard = UiFactory.Card("用网易云音乐 App 扫码", qrBox, _status); panel.Children.Add(_qrCard);
-        var quality = UiFactory.Combo(["标准", "较高", "极高", "无损", "Hi-Res"], Array.IndexOf(new[] { "standard", "higher", "exhigh", "lossless", "hires" }, vm.Settings.NeteaseQuality));
-        if (quality.SelectedIndex < 0) quality.SelectedIndex = 2;
-        quality.SelectionChanged += (_, _) => { if (quality.SelectedIndex >= 0) { vm.Settings.NeteaseQuality = new[] { "standard", "higher", "exhigh", "lossless", "hires" }[quality.SelectedIndex]; vm.SaveSettings(); } };
+        var levels = new[] { "auto", "standard", "higher", "exhigh", "lossless", "hires" };
+        var quality = UiFactory.Combo(["最高可用", "标准", "较高", "极高", "无损", "Hi-Res"], Array.IndexOf(levels, vm.Settings.NeteaseQuality));
+        if (quality.SelectedIndex < 0) quality.SelectedIndex = 0;
+        quality.SelectionChanged += (_, _) => { if (quality.SelectedIndex >= 0) { vm.Settings.NeteaseQuality = levels[quality.SelectedIndex]; vm.SaveSettings(); } };
         panel.Children.Add(UiFactory.Card("播放音质", quality, UiFactory.Text("按账号权益获取音质，更改后下次播放生效。", 11)));
         var lyrics = UiFactory.Check("自动补全本地与 Navidrome 歌词", vm.Settings.NeteaseLyrics);
         lyrics.Checked += (_, _) => { vm.Settings.NeteaseLyrics = true; vm.SaveSettings(); }; lyrics.Unchecked += (_, _) => { vm.Settings.NeteaseLyrics = false; vm.SaveSettings(); };

@@ -1,5 +1,5 @@
 #ifndef AppVersion
-#define AppVersion "1.3.2"
+#define AppVersion "1.3.3"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist"
@@ -17,7 +17,7 @@ AppPublisher=Chili
 AppPublisherURL=https://github.com/sawanolin/chilimusic
 AppSupportURL=https://github.com/sawanolin/chilimusic/issues
 AppUpdatesURL=https://github.com/sawanolin/chilimusic/releases/latest
-DefaultDirName={localappdata}\Programs\chilimusic
+DefaultDirName={code:DefaultInstallDirectory}
 DefaultGroupName=chilimusic
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
@@ -26,6 +26,8 @@ MinVersion=10.0.19041
 DisableProgramGroupPage=yes
 DisableWelcomePage=no
 UsePreviousAppDir=yes
+DisableDirPage=no
+AlwaysShowDirOnReadyPage=yes
 UsePreviousTasks=yes
 CloseApplications=yes
 RestartApplications=no
@@ -77,6 +79,7 @@ Filename: "{app}\chilimusic.exe"; Description: "启动 chilimusic"; Flags: nowai
 
 [Code]
 #include "runtime.iss"
+#include "upgrade.iss"
 
 var
   EnvironmentPage: TWizardPage;
@@ -114,7 +117,15 @@ begin
 end;
 
 procedure InitializeWizard;
+var
+  PreviousDirectory: String;
 begin
+  PreviousDirectory := PreviousInstallDirectory;
+  if PreviousDirectory <> '' then
+  begin
+    WizardForm.WelcomeLabel2.Caption := '已检测到安装的 chilimusic，本次将更新到新版本。安装目录默认沿用旧版，账号、歌单和播放记录会保留。';
+    WizardForm.SelectDirLabel.Caption := '已识别旧版目录，将在此目录覆盖更新。需要更换目录时，可点击“浏览”。';
+  end;
   EnvironmentPage := CreateCustomPage(wpWelcome, '运行环境', '检查电脑是否可以运行 chilimusic');
   EnvironmentStatus := TNewStaticText.Create(EnvironmentPage);
   EnvironmentStatus.Parent := EnvironmentPage.Surface;

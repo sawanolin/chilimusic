@@ -137,10 +137,18 @@ public partial class App : Application
     public void NotifyTrack(Track track) { if (Vm.Settings.NotifyTrack) _tray?.ShowBalloonTip(3000, track.Title, track.Artist, System.Windows.Forms.ToolTipIcon.None); }
     public new void Exit()
     {
+        Cleanup(); Shutdown();
+    }
+    private void Cleanup()
+    {
         if (Exiting) return; Exiting = true; _exitCts.Cancel(); _trayClick.Stop(); SystemEvents.UserPreferenceChanged -= OnPreferences;
         if (Vm != null) Vm.SettingsChanged -= OnSettingsChanged;
         Remote?.Dispose(); _functionKeys?.Dispose(); _taskbar?.Dispose(); _tray?.Dispose(); _icon?.Dispose(); NativeFonts.Dispose(); try { Vm?.Dispose(); } catch (Exception e) { Store.Log("ERROR", $"退出保存失败 {e.GetType().Name}"); }
-        Shutdown();
     }
-    protected override void OnExit(ExitEventArgs e) { if (_ownsMutex) _mutex?.ReleaseMutex(); _mutex?.Dispose(); _exitCts.Dispose(); base.OnExit(e); }
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        if (!Exiting && Vm != null) try { Vm.SaveQueue(); Vm.SaveSettings(); } catch (Exception error) { Store.Log("ERROR", $"退出保存失败 {error.GetType().Name}"); }
+        base.OnSessionEnding(e);
+    }
+    protected override void OnExit(ExitEventArgs e) { Cleanup(); if (_ownsMutex) _mutex?.ReleaseMutex(); _mutex?.Dispose(); _exitCts.Dispose(); base.OnExit(e); }
 }

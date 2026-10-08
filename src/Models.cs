@@ -95,6 +95,7 @@ public sealed class QueueState
     public List<int> History { get; set; } = [];
     public int HistoryPosition { get; set; } = -1;
     public List<int> ShuffleRemaining { get; set; } = [];
+    public List<int> PlayNext { get; set; } = [];
 }
 
 public sealed record AudioDevice(string Name, string Description) { public override string ToString() => Description; }

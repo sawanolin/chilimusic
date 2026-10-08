@@ -25,7 +25,7 @@ public partial class MainWindow : Window
         LibraryList.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(BrowseScrolled)); TracksList.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(BrowseScrolled));
         IsVisibleChanged += (_, _) => { if (IsVisible) { _coverTimer.Start(); } else { _coverTimer.Stop(); Vm.ReleaseBrowseImages(); } };
         Closing += (_, e) => { if (Host.Exiting) return; if (Vm.Settings.CloseToTray) { e.Cancel = true; Hide(); } else Host.Exit(); };
-        var menu = new ContextMenu(); AddItem(menu, "立即播放", () => { if (TracksList.SelectedItem is Track t) Vm.Run(() => Vm.PlayTrackAsync(t)); }); AddItem(menu, "下一首播放", () => { if (TracksList.SelectedItem is Track t) Vm.Add(t, true); }); AddItem(menu, "添加到队列", () => { if (TracksList.SelectedItem is Track t) Vm.Add(t, false); }); TracksList.ContextMenu = menu;
+        var menu = new ContextMenu(); AddItem(menu, "立即播放", () => { if (TracksList.SelectedItem is Track t) Vm.Run(() => Vm.PlayBrowseTrackAsync(t)); }); AddItem(menu, "下一首播放", () => Vm.AddRange(SelectedTracks(), true)); AddItem(menu, "添加到队列", () => Vm.AddRange(SelectedTracks(), false)); TracksList.ContextMenu = menu;
         var qm = new ContextMenu(); AddItem(qm, "移除", () => Vm.Remove(QueueList.SelectedIndex)); AddItem(qm, "上移", () => Vm.Move(QueueList.SelectedIndex, QueueList.SelectedIndex - 1)); AddItem(qm, "下移", () => Vm.Move(QueueList.SelectedIndex, QueueList.SelectedIndex + 1)); QueueList.ContextMenu = qm;
         TracksList.SelectionMode = SelectionMode.Extended;
         AddItem(menu, "加入歌单…", () => Host.ShowTools("歌单", TracksList.SelectedItems.Cast<Track>().ToArray()));
@@ -34,15 +34,16 @@ public partial class MainWindow : Window
         var albumsMenu = new ContextMenu(); AddItem(albumsMenu, "打开", () => { if (LibraryList.SelectedItem is LibraryItem item) Vm.Run(() => Vm.BrowseAsync(item.Title, item: item)); }); AddItem(albumsMenu, "下载专辑", () => { if (LibraryList.SelectedItem is LibraryItem item) { Host.ShowTools("离线"); Vm.Run(() => Vm.DownloadAlbumAsync(item)); } }); LibraryList.ContextMenu = albumsMenu; LibraryList.PreviewMouseRightButtonDown += SelectRightClick;
         AddItem(qm, "保存到歌单…", () => Host.ShowTools("歌单", Vm.Queue.ToArray()));
         TracksList.PreviewMouseRightButtonDown += SelectRightClick; QueueList.PreviewMouseRightButtonDown += SelectRightClick;
+        InitializeInteractions(menu, qm, albumsMenu);
     }
     private static void AddItem(ContextMenu menu, string name, Action action) { var item = new MenuItem { Header = name }; item.Click += (_, _) => action(); menu.Items.Add(item); }
     private static ListBoxItem? Row(DependencyObject? node) { while (node != null && node is not ListBoxItem) node = VisualTreeHelper.GetParent(node); return node as ListBoxItem; }
-    private void SelectRightClick(object sender, MouseButtonEventArgs e) { if (Row(e.OriginalSource as DependencyObject) is { } row) row.IsSelected = true; }
+    private void SelectRightClick(object sender, MouseButtonEventArgs e) { if (Row(e.OriginalSource as DependencyObject) is { } row && !row.IsSelected) { if (sender is ListBox list) list.SelectedItems.Clear(); row.IsSelected = true; } }
     public void FocusSearch() { SearchBox.Focus(); }
     public void FocusQueue() { QueueList.Focus(); }
     private void Navigate(object sender, RoutedEventArgs e) { _searchTimer.Stop(); Vm.Run(() => Vm.BrowseAsync(((Button)sender).Content.ToString()!)); }
     private void UpdateNavigation() { foreach (var button in NavigationStack.Children.OfType<Button>()) { bool selected = button.Content.ToString() == Vm.Navigation; button.SetResourceReference(Button.BackgroundProperty, selected ? "SelectedBrush" : "SidebarBrush"); button.SetResourceReference(Button.ForegroundProperty, selected ? "AccentBrush" : "TextBrush"); button.ApplyTemplate(); if (button.Template.FindName("Indicator", button) is FrameworkElement indicator) indicator.Visibility = selected ? Visibility.Visible : Visibility.Collapsed; } }
-    private void SearchChanged(object sender, TextChangedEventArgs e) { _searchTimer.Stop(); _searchTimer.Start(); }
+    private void SearchChanged(object sender, TextChangedEventArgs e) { _searchTimer.Stop(); if (!_syncSearch) _searchTimer.Start(); }
     private void ClearSearchClick(object sender, RoutedEventArgs e) => SearchBox.Clear();
     private void CategoryChanged(object sender, SelectionChangedEventArgs e) { if (DataContext is PlayerViewModel vm && CategoryBox.SelectedItem is ComboBoxItem item) vm.SearchCategory = (string)item.Content; }
     private void FormatChanged(object sender, SelectionChangedEventArgs e) { if (DataContext is PlayerViewModel vm && FormatBox.SelectedItem is ComboBoxItem item) vm.FormatFilter = (string)item.Content; }
@@ -64,9 +65,9 @@ public partial class MainWindow : Window
         foreach (var container in UiVerification.FindAll<ListBoxItem>(LibraryList)) { int i = LibraryList.ItemContainerGenerator.IndexFromContainer(container); var rect = container.TransformToAncestor(LibraryList).TransformBounds(new Rect(container.RenderSize)); if (i >= 0 && rect.Bottom >= 0 && rect.Top <= LibraryList.ActualHeight) { first = Math.Min(first, i); last = Math.Max(last, i); } }
         if (last >= 0) Vm.Run(() => Vm.LoadVisibleCoversAsync(first, last - first + 1));
     }
-    private void PlaySelected(object sender, MouseButtonEventArgs e) { if (Row(e.OriginalSource as DependencyObject) != null && TracksList.SelectedItem is Track t) Vm.Run(() => Vm.PlayTrackAsync(t)); }
+    private void PlaySelected(object sender, MouseButtonEventArgs e) { if (Row(e.OriginalSource as DependencyObject) != null && TracksList.SelectedItem is Track t) Vm.Run(() => Vm.PlayBrowseTrackAsync(t)); }
     private void OpenLibrary(object sender, MouseButtonEventArgs e) { if (Row(e.OriginalSource as DependencyObject) != null && LibraryList.SelectedItem is LibraryItem item) Vm.Run(() => Vm.BrowseAsync(item.Title, item: item)); }
-    private void PlayQueue(object sender, MouseButtonEventArgs e) { if (Row(e.OriginalSource as DependencyObject) != null) Vm.Run(() => Vm.PlayAsync(QueueList.SelectedIndex)); }
+    private void PlayQueue(object sender, MouseButtonEventArgs e) { if (Row(e.OriginalSource as DependencyObject) != null) PlayQueueSelection(); }
     private void ClearQueue(object sender, RoutedEventArgs e) => Vm.ClearQueue();
     private void RandomAll(object sender, RoutedEventArgs e) => Vm.Run(() => Vm.RandomAsync(false));
     private void RandomStarred(object sender, RoutedEventArgs e) => Vm.Run(() => Vm.RandomAsync(true));

@@ -17,6 +17,7 @@ internal sealed partial class RemoteControlService : IDisposable
     private readonly Dictionary<string, Track> _tracks = [];
     private readonly Dictionary<Track, string> _keys = [];
     private readonly Dictionary<string, LibraryItem> _albums = [];
+    private readonly Dictionary<string, List<Track>> _contexts = [];
     private readonly object _auth = new();
     private readonly SemaphoreSlim _commands = new(1, 1);
     private int _attempts, _revision;
@@ -34,11 +35,12 @@ internal sealed partial class RemoteControlService : IDisposable
         if (Running) return;
         var server = new LanHttpServer(RouteAsync); server.Start(port); ResetPairing(); _server = server;
     }
-    public void Stop() { if (!((App)Application.Current).Exiting && _vm.MobileOutput) { _vm.PausePlayback(); _vm.Run(() => _vm.SetMobileOutputAsync(false)); } _mobileOwner = null; _server?.Dispose(); _server = null; lock (_auth) { _sessions.Clear(); _code = ""; } _tracks.Clear(); _keys.Clear(); _albums.Clear(); }
+    public void Stop() { if (!((App)Application.Current).Exiting && _vm.MobileOutput) { _vm.PausePlayback(); _vm.Run(() => _vm.SetMobileOutputAsync(false)); } _mobileOwner = null; _server?.Dispose(); _server = null; lock (_auth) { _sessions.Clear(); _code = ""; } _tracks.Clear(); _keys.Clear(); _albums.Clear(); _contexts.Clear(); }
     public void ResetPairing()
     {
         if (_vm.MobileOutput) { _vm.PausePlayback(); _vm.Run(() => _vm.SetMobileOutputAsync(false)); }
         _mobileOwner = null;
+        _contexts.Clear();
         lock (_auth) { _sessions.Clear(); _attempts = 0; _attemptWindow = DateTime.UtcNow; _code = RandomNumberGenerator.GetInt32(100000, 1000000).ToString(); }
     }
     public static IReadOnlyList<string> Addresses() => NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback).SelectMany(n => n.GetIPProperties().UnicastAddresses).Select(a => a.Address).Where(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && LanHttpServer.IsLocalAddress(a) && !IPAddress.IsLoopback(a)).Select(a => a.ToString()).Distinct().OrderBy(a => a.StartsWith("169.254.")).ToArray();
@@ -128,8 +130,16 @@ internal sealed partial class RemoteControlService : IDisposable
         if (_tracks.Count >= 14000) throw new ApiException("曲库较大，请重新连接手机遥控。");
         key = Guid.NewGuid().ToString("N"); _keys[track] = key; _tracks[key] = track; return key;
     }
-    private object Song(Track track, int? index = null) => new { key = Key(track), index, title = track.Title, artist = track.Artist, album = track.Album, duration = track.Duration, format = track.Format, preview = track.Preview, local = track.IsLocal, favorite = track.Starred != null, cover = track.IsLocal ? track.EmbeddedCoverPath != null || _vm.Current == track && _vm.Cover != null : !string.IsNullOrEmpty(track.CoverArt) };
-    private object State(string token) => new { current = _vm.Current == null ? null : Song(_vm.Current, _vm.Index), playing = _vm.MobileOutput ? _vm.MobilePlaying : !_vm.Player.IsIdle && !_vm.Player.IsPaused, idle = _vm.Current == null || !_vm.MobileOutput && _vm.Player.IsIdle, position = _vm.Position, duration = _vm.Duration, volume = _vm.Volume, mute = _vm.Settings.Mute, mode = (int)_vm.Settings.Mode, modeText = _vm.ModeText, revision = _revision, queueTotal = _vm.Queue.Count, next = _vm.Queue.Skip(Math.Max(0, _vm.Index + 1)).Take(3).Select((t, i) => Song(t, Math.Max(0, _vm.Index + 1) + i)).ToArray(), colors = Theme.WebColors(), theme = Theme.Current.Name, dark = Theme.IsDark, seekRevision = _vm.SeekRevision, lyricsRevision = _vm.LyricsRevision, lyricOffset = _vm.LyricOffset, server = _vm.Api.NavidromeConfigured, netease = true, sleep = _vm.SleepStatus, output = _vm.MobileOutput ? "phone" : "computer", phoneOwner = token == _mobileOwner };
+    private static string? LocalCoverPath(Track track) => track.EmbeddedCoverPath ?? new[] { "cover.jpg", "folder.jpg", "cover.png", "folder.png" }.Select(n => Path.Combine(Path.GetDirectoryName(track.LocalPath!)!, n)).FirstOrDefault(File.Exists);
+    private object Song(Track track, int? index = null) => new { key = Key(track), index, title = track.Title, artist = track.Artist, album = track.Album, duration = track.Duration, format = track.Format, preview = track.Preview, local = track.IsLocal, favorite = track.Starred != null, cover = track.IsLocal ? LocalCoverPath(track) != null || _vm.Current == track && _vm.Cover != null : !string.IsNullOrEmpty(track.CoverArt) };
+    private string Context(IEnumerable<Track> source, string? previous = null)
+    {
+        var tracks = source.ToList();
+        if (previous != null && _contexts.TryGetValue(previous, out var before)) tracks = before.Concat(tracks).DistinctBy(t => t.Id).ToList();
+        if (_contexts.Count >= 64) _contexts.Remove(_contexts.Keys.First());
+        string key = Guid.NewGuid().ToString("N"); _contexts[key] = tracks; return key;
+    }
+    private object State(string token) => new { current = _vm.Current == null ? null : Song(_vm.Current, _vm.Index), playing = _vm.MobileOutput ? _vm.MobilePlaying : !_vm.Player.IsIdle && !_vm.Player.IsPaused, idle = _vm.Current == null || !_vm.MobileOutput && _vm.Player.IsIdle, position = _vm.Position, duration = _vm.Duration, volume = _vm.Volume, mute = _vm.Settings.Mute, mode = (int)_vm.Settings.Mode, modeText = _vm.ModeText, revision = _revision, queueTotal = _vm.Queue.Count, next = _vm.UpcomingIndices().Select(i => Song(_vm.Queue[i], i)).ToArray(), colors = Theme.WebColors(), theme = Theme.Current.Name, dark = Theme.IsDark, seekRevision = _vm.SeekRevision, lyricsRevision = _vm.LyricsRevision, lyricOffset = _vm.LyricOffset, server = _vm.Api.NavidromeConfigured, netease = true, sleep = _vm.SleepStatus, output = _vm.MobileOutput ? "phone" : "computer", phoneOwner = token == _mobileOwner };
     private static int Offset(Dictionary<string, string> query) => query.TryGetValue("offset", out var value) && int.TryParse(value, out var offset) ? Math.Clamp(offset, 0, 100000) : 0;
     private async Task<object> LibraryAsync(Dictionary<string, string> query, CancellationToken ct)
     {
@@ -140,7 +150,7 @@ internal sealed partial class RemoteControlService : IDisposable
             var all = source == "offline" ? _vm.OfflineEntries.Select(e => e.Track) : _vm.LocalLibrary.Snapshot.AsEnumerable();
             if (source == "favorite") all = all.Where(t => t.Starred != null);
             var matches = all.Where(t => (t.Title + " " + t.Artist + " " + t.Album).Contains(term, StringComparison.CurrentCultureIgnoreCase)).ToArray();
-            return new { tracks = matches.Skip(offset).Take(50).Select(t => Song(t)).ToArray(), albums = Array.Empty<object>(), more = offset + 50 < matches.Length, offset };
+            return new { tracks = matches.Skip(offset).Take(50).Select(t => Song(t)).ToArray(), albums = Array.Empty<object>(), more = offset + 50 < matches.Length, offset, context = Context(matches) };
         }
         if (source is not ("server" or "netease") || source == "server" && !_vm.Api.NavidromeConfigured) throw new ApiException("服务器未连接");
         if (term.Length == 0 && source == "netease" && view is "recent" or "favorites" or "daily")
@@ -148,12 +158,12 @@ internal sealed partial class RemoteControlService : IDisposable
             string endpoint = view == "recent" ? "getRecentSongs" : view == "daily" ? "getDailyRecommendations" : "getStarred2";
             string container = view == "recent" ? "recentSongs" : view == "daily" ? "randomSongs" : "starred2";
             var root = await _vm.Api.CallSourceAsync(source, endpoint, ct); var songs = NavidromeApiClient.Tracks(root, container);
-            return new { tracks = songs.Skip(offset).Take(50).Select(t => Song(t)).ToArray(), albums = Array.Empty<object>(), more = offset + 50 < songs.Count, offset };
+            return new { tracks = songs.Skip(offset).Take(50).Select(t => Song(t)).ToArray(), albums = Array.Empty<object>(), more = offset + 50 < songs.Count, offset, context = Context(songs) };
         }
         if (term.Length > 0)
         {
             var root = await _vm.Api.CallSourceAsync(source, "search3", ct, ("query", term), ("songCount", "50"), ("songOffset", offset.ToString()), ("albumCount", "0"), ("artistCount", "0")); var songs = NavidromeApiClient.Tracks(root, "searchResult3");
-            return new { tracks = songs.Select(t => Song(t)).ToArray(), albums = Array.Empty<object>(), more = songs.Count == 50, offset };
+            return new { tracks = songs.Select(t => Song(t)).ToArray(), albums = Array.Empty<object>(), more = songs.Count == 50, offset, context = Context(songs, offset > 0 ? query.GetValueOrDefault("context") : null) };
         }
         var result = await _vm.Api.CallSourceAsync(source, "getAlbumList2", ct, ("type", view == "recent" ? "recent" : "newest"), ("size", "50"), ("offset", offset.ToString())); var albums = new List<object>();
         if (result.TryGetProperty("albumList2", out var list) && list.TryGetProperty("album", out var rows)) foreach (var row in rows.EnumerateArray())
@@ -166,8 +176,8 @@ internal sealed partial class RemoteControlService : IDisposable
     private async Task<object> AlbumAsync(Dictionary<string, string> query, CancellationToken ct)
     {
         if (!_albums.TryGetValue(query.GetValueOrDefault("key", ""), out var album)) throw new KeyNotFoundException();
-        var root = await _vm.Api.CallAsync("getAlbum", ct, ("id", album.Id)); var tracks = NavidromeApiClient.Tracks(root, "album");
-        return new { title = album.Title, tracks = tracks.Take(1000).Select(t => Song(t)).ToArray(), albums = Array.Empty<object>(), more = false, offset = 0 };
+        var root = await _vm.Api.CallAsync("getAlbum", ct, ("id", album.Id)); var tracks = NavidromeApiClient.Tracks(root, "album").OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber).ToList();
+        return new { title = album.Title, tracks = tracks.Take(1000).Select(t => Song(t)).ToArray(), albums = Array.Empty<object>(), more = false, offset = 0, context = Context(tracks) };
     }
     private async Task<byte[]?> CoverAsync(Dictionary<string, string> query, CancellationToken ct)
     {
@@ -175,7 +185,7 @@ internal sealed partial class RemoteControlService : IDisposable
         if (_tracks.TryGetValue(key, out var track))
         {
             if (track == _vm.Current) image = _vm.Cover as BitmapSource;
-            if (image == null) { string? path = track.IsLocal ? track.EmbeddedCoverPath ?? new[] { "cover.jpg", "folder.jpg", "cover.png", "folder.png" }.Select(n => Path.Combine(Path.GetDirectoryName(track.LocalPath!)!, n)).FirstOrDefault(File.Exists) : await _vm.Covers.GetPathAsync(track.CoverArt, _vm.Settings.CoverCacheMb, ct); image = await Task.Run(() => CoverCacheService.Load(path, 420), ct); }
+            if (image == null) { string? path = track.IsLocal ? LocalCoverPath(track) : await _vm.Covers.GetPathAsync(track.CoverArt, _vm.Settings.CoverCacheMb, ct); image = await Task.Run(() => CoverCacheService.Load(path, 420), ct); }
         }
         else if (_albums.TryGetValue(key, out var album)) { var path = await _vm.Covers.GetPathAsync(album.CoverArt, _vm.Settings.CoverCacheMb, ct); image = await Task.Run(() => CoverCacheService.Load(path, 160), ct); }
         if (image == null) return null; var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(image)); using var memory = new MemoryStream(); encoder.Save(memory); return memory.ToArray();
@@ -207,7 +217,11 @@ internal sealed partial class RemoteControlService : IDisposable
             case "queue-move": int from = QueueIndex(), to = command.GetProperty("to").GetInt32(); if (to < 0 || to >= _vm.Queue.Count) throw new ArgumentException(); _vm.Move(from, to); break;
             case "add": _vm.Add(Selected(), false); break;
             case "add-next": _vm.Add(Selected(), true); break;
-            case "play-track": await _vm.PlayTrackAsync(Selected()); break;
+            case "play-track":
+                var selected = Selected();
+                if (command.TryGetProperty("context", out var context)) { if (!_contexts.TryGetValue(context.GetString() ?? "", out var tracks)) throw new ApiException("列表已更新，请重新打开曲库。"); await _vm.PlayFromListAsync(selected, tracks); }
+                else await _vm.PlayTrackAsync(selected);
+                break;
             default: throw new ArgumentException();
         }
     }

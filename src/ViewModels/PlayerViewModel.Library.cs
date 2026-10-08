@@ -10,6 +10,11 @@ public sealed partial class PlayerViewModel
     private LibraryItem? _browseItem;
     private string _browseQuery = "";
     private (string Section, LibraryItem? Item, string Format, string Artist, string Album, string Category)? _beforeSearch;
+    private readonly Stack<(string Section, string Query, LibraryItem? Item, string Format, string Artist, string Album, string Category)> _browseHistory = new();
+    public bool CanGoBack => _browseHistory.Count > 0;
+    public string BrowseQuery => _browseQuery;
+    public bool CanSortAlbums => _browseItem == null && Section is "最近添加" or "专辑";
+    public bool IsSearch => Section == "搜索";
     private int _songOffset, _albumOffset, _artistOffset;
     private bool _hasMore, _browsing;
     private const int PageSize = 60;
@@ -30,13 +35,19 @@ public sealed partial class PlayerViewModel
     public bool IsDownloading => Offline.Downloading;
     private string _downloadStatus = "选择歌曲或专辑后下载";
     public string DownloadStatus { get => _downloadStatus; set { _downloadStatus = value; Changed(); } }
-    public async Task BrowseAsync(string section, string query = "", LibraryItem? item = null)
+    public async Task BrowseAsync(string section, string query = "", LibraryItem? item = null, bool remember = true)
     {
-        if (section == "搜索" && Section != "搜索") _beforeSearch = (Section, _browseItem, FormatFilter, ArtistFilter, AlbumFilter, SearchCategory);
+        if (remember && (section != Section || item?.Id != _browseItem?.Id || section != "搜索" && query != _browseQuery))
+        {
+            _browseHistory.Push((Section, _browseQuery, _browseItem, FormatFilter, ArtistFilter, AlbumFilter, SearchCategory));
+            Changed(nameof(CanGoBack));
+        }
+        if (remember && section == "搜索" && Section != "搜索") _beforeSearch = (Section, _browseItem, FormatFilter, ArtistFilter, AlbumFilter, SearchCategory);
         _browseCts.Cancel(); _browseCts.Dispose(); _browseCts = new(); int generation = ++_browseGeneration;
         _browseItem = item; _browseQuery = query; _songOffset = _albumOffset = _artistOffset = 0;
         if (item == null && section != "搜索") Navigation = section;
-        Section = section; Results.Clear(); Library.Clear(); HasMore = false; IsBrowsing = true; Status = "正在加载…";
+        if (section != "搜索") { _searchCategory = "全部"; _formatFilter = "全部格式"; _artistFilter = _albumFilter = ""; Changed(nameof(SearchCategory)); Changed(nameof(FormatFilter)); Changed(nameof(ArtistFilter)); Changed(nameof(AlbumFilter)); }
+        Section = section; Changed(nameof(BrowseQuery)); Changed(nameof(CanSortAlbums)); Changed(nameof(IsSearch)); Results.Clear(); Library.Clear(); HasMore = false; IsBrowsing = true; Status = "正在加载…";
         try { await FetchPageAsync(false, generation, _browseCts.Token); }
         finally { if (generation == _browseGeneration) IsBrowsing = false; }
     }
@@ -51,7 +62,7 @@ public sealed partial class PlayerViewModel
         List<Track> tracks = []; List<LibraryItem> items = []; bool more = false;
         if (_browseItem?.Kind is "local-album" or "local-artist")
         {
-            var all = _localTracks.Where(t => _browseItem.Kind == "local-album" ? t.Album == _browseItem.Title : t.Artist == _browseItem.Title).OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber).ThenBy(t => t.Title).ToList(); tracks.AddRange(all.Skip(_songOffset).Take(PageSize)); _songOffset += tracks.Count; more = _songOffset < all.Count;
+            var all = _localTracks.Where(t => _browseItem.Kind == "local-album" ? t.Album == _browseItem.Title : t.Artist == _browseItem.Title).OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber).ThenBy(t => t.Title).ToList(); tracks.AddRange(_browseItem.Kind == "local-album" ? all : all.Skip(_songOffset).Take(PageSize)); _songOffset += tracks.Count; more = _songOffset < all.Count;
         }
         else if (Navigation == "本地音乐" && Section == "搜索" || Section == "本地音乐" || Section == "搜索" && !Api.Configured)
         {
@@ -93,7 +104,7 @@ public sealed partial class PlayerViewModel
                 int albumCount = items.Count(i => i.Kind == "album"), artistCount = items.Count(i => i.Kind == "artist"); _songOffset += tracks.Count; _albumOffset += albumCount; _artistOffset += artistCount;
                 more = tracks.Count == PageSize || albumCount == 30 || artistCount == 30;
             }
-            if (endpoint == "getAlbum") tracks.AddRange(NavidromeApiClient.Tracks(root, "album"));
+            if (endpoint == "getAlbum") tracks.AddRange(NavidromeApiClient.Tracks(root, "album").OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber));
             if (endpoint == "getPlaylist") tracks.AddRange(NavidromeApiClient.Tracks(root, "playlist", "entry"));
             if (endpoint == "getArtist" && root.TryGetProperty("artist", out var artist)) Rows(artist, "album", "album", items);
             if (endpoint == "getAlbumList2" && root.TryGetProperty("albumList2", out var albums)) { Rows(albums, "album", "album", items); _albumOffset += items.Count; more = items.Count == PageSize; }
@@ -131,8 +142,32 @@ public sealed partial class PlayerViewModel
     public async Task ClearSearchAsync()
     {
         if (Section != "搜索") return; var previous = _beforeSearch; _beforeSearch = null;
+        if (previous is { } old && _browseHistory.TryPeek(out var last) && last.Section == old.Section && last.Item?.Id == old.Item?.Id) { _browseHistory.Pop(); Changed(nameof(CanGoBack)); }
         if (previous is { } snapshot) { _formatFilter = snapshot.Format; _artistFilter = snapshot.Artist; _albumFilter = snapshot.Album; _searchCategory = snapshot.Category; Changed(nameof(FormatFilter)); Changed(nameof(ArtistFilter)); Changed(nameof(AlbumFilter)); Changed(nameof(SearchCategory)); }
-        await BrowseAsync(previous?.Section ?? Navigation, item: previous?.Item);
+        await BrowseAsync(previous?.Section ?? Navigation, item: previous?.Item, remember: false);
+        if (previous is { } restored) RestoreFilters(restored.Format, restored.Artist, restored.Album, restored.Category);
+    }
+    private void RestoreFilters(string format, string artist, string album, string category)
+    {
+        _formatFilter = format; _artistFilter = artist; _albumFilter = album; _searchCategory = category;
+        Changed(nameof(FormatFilter)); Changed(nameof(ArtistFilter)); Changed(nameof(AlbumFilter)); Changed(nameof(SearchCategory)); ApplyResultFilter();
+    }
+    public async Task GoBackAsync()
+    {
+        if (!_browseHistory.TryPop(out var previous)) return;
+        Changed(nameof(CanGoBack)); await BrowseAsync(previous.Section, previous.Query, previous.Item, remember: false);
+        RestoreFilters(previous.Format, previous.Artist, previous.Album, previous.Category);
+    }
+    public Task PlayBrowseTrackAsync(Track track) => PlayFromListAsync(track, CollectionViewSource.GetDefaultView(Results).Cast<Track>().ToArray());
+    public async Task PlayLibraryAsync(LibraryItem item, bool enqueue = false)
+    {
+        List<Track> tracks;
+        if (item.Kind is "local-album" or "local-artist") tracks = _localTracks.Where(t => item.Kind == "local-album" ? t.Album == item.Title : t.Artist == item.Title).OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber).ThenBy(t => t.Title).ToList();
+        else if (item.Kind == "local-playlist") tracks = Playlists.Local.FirstOrDefault(p => p.Id == item.Id)?.Tracks.ToList() ?? [];
+        else if (item.Kind is "album" or "playlist") { var root = await Api.CallAsync(item.Kind == "album" ? "getAlbum" : "getPlaylist", default, ("id", item.Id)); tracks = NavidromeApiClient.Tracks(root, item.Kind == "album" ? "album" : "playlist", item.Kind == "album" ? "song" : "entry"); if (item.Kind == "album") tracks = tracks.OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber).ToList(); }
+        else { await BrowseAsync(item.Title, item: item); return; }
+        if (tracks.Count == 0) { Status = "没有可播放的歌曲"; return; }
+        if (enqueue) AddRange(tracks, false); else await PlayFromListAsync(tracks[0], tracks);
     }
     private void OnLibraryProgress(string message) => _dispatcher.BeginInvoke(() => Status = message);
     private void OnLocalLibraryUpdated(IReadOnlyList<Track> tracks)

@@ -17,7 +17,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     public void Changed([CallerMemberName] string? name = null) { PropertyChanged?.Invoke(this, new(name)); if (name == nameof(PlayGlyph)) { PropertyChanged?.Invoke(this, new(nameof(PlayIcon))); Changed(nameof(IsProgressMoving)); } if (name == nameof(Position)) PropertyChanged?.Invoke(this, new(nameof(PositionText))); if (name == nameof(Duration)) PropertyChanged?.Invoke(this, new(nameof(DurationText))); }
     public AppSettings Settings { get; }
     public MusicApiClient Api { get; }
-    public string CatalogSource { get => Settings.CatalogSource; set { value = value == "netease" ? "netease" : "navidrome"; if (value == Settings.CatalogSource) return; Settings.CatalogSource = value; SaveSettings(); Changed(); Changed(nameof(IsNeteaseCatalog)); Changed(nameof(ServerConfigured)); Changed(nameof(CatalogName)); _beforeSearch = null; Run(() => BrowseAsync("最近添加")); } }
+    public string CatalogSource { get => Settings.CatalogSource; set { value = value == "netease" ? "netease" : "navidrome"; if (value == Settings.CatalogSource) return; Settings.CatalogSource = value; SaveSettings(); Changed(); Changed(nameof(IsNeteaseCatalog)); Changed(nameof(ServerConfigured)); Changed(nameof(CatalogName)); _beforeSearch = null; _browseHistory.Clear(); Changed(nameof(CanGoBack)); Run(() => BrowseAsync("最近添加", remember: false)); } }
     public bool IsNeteaseCatalog => Api.UsingNetease;
     public string CatalogName => Api.SourceName;
     public bool ServerConfigured => Api.Configured;
@@ -138,7 +138,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     }
     private void SaveSettingsSoon() { _saveTimer.Stop(); _saveTimer.Start(); }
     public void SaveSettings() => Store.Write("config.json", Settings);
-    public void SaveQueue() => Store.Write("queue.json", new QueueState { Tracks = Queue.ToList(), Index = Index, Position = Position, History = _order.History.ToList(), HistoryPosition = _order.Cursor, ShuffleRemaining = _order.Remaining.ToList() });
+    public void SaveQueue() => Store.Write("queue.json", new QueueState { Tracks = Queue.ToList(), Index = Index, Position = Position, History = _order.History.ToList(), HistoryPosition = _order.Cursor, ShuffleRemaining = _order.Remaining.ToList(), PlayNext = _order.Priority.ToList() });
     private void RefreshTrack() { Changed(nameof(Current)); Changed(nameof(Title)); Changed(nameof(Artist)); Changed(nameof(Album)); Changed(nameof(FavoriteGlyph)); Changed(nameof(PlayGlyph)); }
     public async Task PlayAsync(int index, bool resume = false)
     {
@@ -234,6 +234,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         await PlayAsync(next);
     }
     public Task PreviousAsync() { int previous = _order.Previous(); return PlayAsync(previous >= 0 ? previous : Math.Max(0, Index - 1)); }
+    public IReadOnlyList<int> UpcomingIndices(int maximum = 3) => _order.Upcoming(Index, Settings.Mode, maximum);
     public void CycleMode() { Settings.Mode = (PlayMode)(((int)Settings.Mode + 1) % 4); Changed(nameof(ModeText)); Changed(nameof(ModeIcon)); SaveSettings(); PrepareNext(); }
     public void ToggleMute() { Settings.Mute = !Settings.Mute; Player.Set("mute", Settings.Mute ? "yes" : "no"); Changed(nameof(MuteText)); SaveSettings(); }
     public async Task ToggleFavoriteAsync()
@@ -249,16 +250,42 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         if (tracks.Count == 0) { Status = favorites ? "还没有收藏歌曲" : "音乐库中没有歌曲"; return; }
         ReplaceQueue(tracks); await PlayAsync(0);
     }
-    public async Task PlayTrackAsync(Track track) { Queue.Add(track); await PlayAsync(Queue.Count - 1); }
+    public async Task PlayTrackAsync(Track track)
+    {
+        int index = Queue.ToList().FindIndex(t => t.Id == track.Id);
+        if (index < 0) { Queue.Add(track); index = Queue.Count - 1; }
+        await PlayAsync(index);
+    }
+    public async Task PlayFromListAsync(Track selected, IEnumerable<Track> source)
+    {
+        var tracks = source.ToList(); int index = tracks.FindIndex(t => ReferenceEquals(t, selected));
+        if (index < 0) index = tracks.FindIndex(t => t.Id == selected.Id);
+        if (index < 0) throw new ApiException("歌曲已不在当前列表，请刷新后重试。");
+        if (!Queue.Select(t => t.Id).SequenceEqual(tracks.Select(t => t.Id))) ReplaceQueue(tracks);
+        if (Index == index && (MobileOutput || !Player.IsIdle)) await ResumePlaybackAsync();
+        else await PlayAsync(index);
+    }
     public void ReplaceQueue(IEnumerable<Track> tracks) { Stop(); Queue.ReplaceWith(tracks); RefreshTrack(); SaveQueue(); }
-    public void Add(Track track, bool next) { if (next && Index >= 0) Queue.Insert(Index + 1, track); else Queue.Add(track); SaveQueue(); Status = next ? "已加入下一首" : "已加入队列"; }
-    public void Move(int from, int to) { if (from < 0 || to < 0 || from >= Queue.Count || to >= Queue.Count) return; var current = Current; Queue.Move(from, to); Index = current == null ? -1 : Queue.IndexOf(current); SaveQueue(); RefreshTrack(); }
+    public void Add(Track track, bool next) => AddRange([track], next);
+    public void AddRange(IEnumerable<Track> source, bool next)
+    {
+        var tracks = source.ToList(); int index = next && Index >= 0 ? Index + 1 : Queue.Count, first = index;
+        foreach (var track in tracks) Queue.Insert(index++, track);
+        if (next) { _order.QueueNext(Enumerable.Range(first, tracks.Count)); PrepareNext(); }
+        SaveQueue(); Status = $"已加入{(next ? "下一首" : "队列")} · {tracks.Count} 首";
+    }
+    public void Move(int from, int to) { if (from < 0 || to < 0 || from >= Queue.Count || to >= Queue.Count) return; Queue.Move(from, to); SaveQueue(); RefreshTrack(); }
     public void Remove(int index)
     {
         if (index < 0 || index >= Queue.Count) return; bool current = index == Index; var active = Current;
-        if (current) Stop(); Queue.RemoveAt(index); Index = current ? -1 : active == null ? -1 : Queue.IndexOf(active); RefreshTrack(); SaveQueue();
+        bool loaded = MobileOutput ? active != null : !Player.IsIdle, playing = MobileOutput ? MobilePlaying : loaded && !Player.IsPaused;
+        if (current) Stop(); Queue.RemoveAt(index);
+        if (current) Index = Queue.Count == 0 ? -1 : Math.Min(index, Queue.Count - 1);
+        if (current) { Cover = null; AudioInfo = ""; Quality = "尚未播放"; ClearLyrics(); SetLyricDocument(0); Duration = Current?.Duration ?? 0; Changed(nameof(Duration)); }
+        RefreshTrack(); SaveQueue();
+        if (current && Index >= 0 && loaded) { int next = Index; Run(async () => { await PlayAsync(next); if (!playing) PausePlayback(); }); }
     }
-    public void ClearQueue() { Stop(); Queue.Clear(); Index = -1; Cover = null; Quality = "尚未播放"; RefreshTrack(); SaveQueue(); }
+    public void ClearQueue() { Stop(); Queue.Clear(); Index = -1; Cover = null; Duration = 0; Changed(nameof(Duration)); Quality = "尚未播放"; AudioInfo = ""; ClearLyrics(); SetLyricDocument(0); RefreshTrack(); SaveQueue(); }
     private async Task ReconnectAsync()
     {
         if (Current?.IsLocal == true) { Stop(); Status = "无法播放这个文件，请检查文件是否完整。"; return; }

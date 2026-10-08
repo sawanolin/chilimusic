@@ -17,6 +17,8 @@ internal static class WindowAppearance
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
     public static void Attach(Window window)
     {
+        if (window is DialogShell or SettingsWindow or InfoWindow)
+            window.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape && System.Windows.Input.Keyboard.FocusedElement is not ComboBox { IsDropDownOpen: true }) { window.Close(); e.Handled = true; } };
         window.UseLayoutRounding = true;
         window.SnapsToDevicePixels = true;
         window.SourceInitialized += (_, _) => Apply(window);

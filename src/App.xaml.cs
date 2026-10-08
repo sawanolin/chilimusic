@@ -29,7 +29,7 @@ public partial class App : Application
         if (e.Args.Contains("--qa-netease-network")) { await NeteaseVerification.NetworkAsync(); Shutdown(); return; }
         if (e.Args.Contains("--allow-remote") || e.Args.Contains("--allow-remote-public")) { bool allowed = RemoteFirewall.Allow(e.Args.Contains("--allow-remote-public")); if (!allowed) MessageBox.Show("未能添加连接规则，请在 Windows 防火墙中允许 chilimusic 通过专用网络。", "chilimusic"); Shutdown(allowed ? 0 : 1); return; }
         if (e.Args.Contains("--self-test")) { try { await SelfTest.RunAsync(e.Args); Shutdown(0); } catch (Exception error) { Store.Write("selftest-failure.json", new { Error = error.GetType().Name, Message = error is ApiException ? error.Message : "验收失败" }); Shutdown(1); } return; }
-        if (e.Args.Contains("--qa-remote") || e.Args.Contains("--qa-quality") || e.Args.Contains("--qa-immersive") || e.Args.Contains("--qa-netease-ui") || e.Args.Contains("--qa-netease-full")) { FeatureVerification.RequireIsolatedProfile(); _remoteQa = true; }
+        if (e.Args.Contains("--qa-remote") || e.Args.Contains("--qa-quality") || e.Args.Contains("--qa-immersive") || e.Args.Contains("--qa-usability") || e.Args.Contains("--qa-netease-ui") || e.Args.Contains("--qa-netease-full")) { FeatureVerification.RequireIsolatedProfile(); _remoteQa = true; }
         _mutex = new Mutex(true, @"Local\" + InstanceName, out _ownsMutex);
         if (!_ownsMutex) { try { using var pipe = new NamedPipeClientStream(".", InstanceName, PipeDirection.Out); await pipe.ConnectAsync(2000); await pipe.WriteAsync(new byte[] { 1 }); } catch (IOException) { } catch (TimeoutException) { } Shutdown(); return; }
         DispatcherUnhandledException += (_, args) => { Store.Log("ERROR", $"UI 异常 {args.Exception.GetType().Name}"); if (Vm != null) Vm.Status = "操作发生异常，请重试。"; args.Handled = true; };
@@ -46,6 +46,7 @@ public partial class App : Application
             else if (e.Args.Contains("--qa-netease-ui")) Vm.Run(() => NeteaseVerification.UiAsync(this));
             else if (e.Args.Contains("--qa-quality")) Vm.Run(() => UiVerification.RunQualityAsync(this));
             else if (e.Args.Contains("--qa-immersive")) Vm.Run(() => ImmersiveVerification.RunAsync(this));
+            else if (e.Args.Contains("--qa-usability")) Vm.Run(() => UsabilityVerification.RunAsync(this));
             else if (_remoteQa) Vm.Run(() => RemoteVerification.RunAsync(this, _taskbar));
             else if (e.Args.Contains("--qa-features")) Vm.Run(() => FeatureUiVerification.RunAsync(this, _taskbar, e.Args.Contains("--qa-quick")));
             else if (e.Args.Contains("--qa-layout")) Vm.Run(() => UiVerification.RunLayoutAsync(this, _taskbar, e.Args.Skip(1).ToArray()));

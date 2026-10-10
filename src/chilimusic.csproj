@@ -12,7 +12,7 @@
     <AssemblyName>chilimusic</AssemblyName>
     <ApplicationIcon>Resources/player.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.3.3</Version>
+    <Version>1.3.4</Version>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <Product>chilimusic</Product>
     <Description>本地音乐、Navidrome 与网易云音乐播放器</Description>

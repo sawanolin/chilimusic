@@ -14,7 +14,7 @@ namespace ChiliMusic;
 internal static class UsabilityVerification
 {
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
-    internal static async Task RunAsync(App app)
+    internal static async Task RunAsync(App app, TaskbarService taskbar)
     {
         FeatureVerification.RequireIsolatedProfile(); var vm = app.Vm; var passed = new List<string>(); var layouts = new List<object>(); bool live = false;
         try
@@ -54,6 +54,8 @@ internal static class UsabilityVerification
             app.ShowMain(); var main = Application.Current.Windows.OfType<MainWindow>().First();
             await vm.BrowseAsync("专辑 A", item: new LibraryItem("local-album:A", "专辑 A", "歌手", "local-album"));
             await VerifyInteractionsAsync(main, vm, album); passed.Add("Rendered list play, right-click multi-selection, play-next menu and queue location");
+            await VerifyNumberedListsAsync(main, vm, album); passed.Add("Row numbers follow filtered views, recycled rows and duplicate queue edits");
+            await VerifyTaskbarProgressAsync(taskbar, vm); passed.Add("Taskbar progress reaches the full right edge at all configured widths");
             await vm.ImportLyricsAsync(lrc);
             foreach (var palette in ThemeCatalog.All)
             {
@@ -64,7 +66,7 @@ internal static class UsabilityVerification
                 settings.Close();
                 foreach (string tab in new[] { "歌词", "歌单", "离线", "定时" }) { var tools = new MusicToolsWindow(vm, tab); tools.Show(); await InspectAsync(tools, "tools-" + tab, palette.Id, layouts); tools.Close(); }
                 foreach (var entry in new (string Name, Func<Window> Create)[] { ("mini", () => new MiniPlayerWindow(vm)), ("desktop", () => new DesktopLyricsWindow(vm)), ("info", () => new InfoWindow(vm)), ("remote", () => new RemoteControlWindow(app.Remote)), ("account", () => new NeteaseAccountWindow(vm, false)), ("immersive", () => new ImmersiveWindow(vm)) })
-                { var window = entry.Create(); window.Show(); await InspectAsync(window, entry.Name, palette.Id, layouts); window.Close(); }
+                { var window = entry.Create(); window.Show(); await InspectAsync(window, entry.Name, palette.Id, layouts); if (window is ImmersiveWindow immersive) { immersive.QueuePopup.IsOpen = true; await Task.Delay(50); immersive.QueueList.UpdateLayout(); foreach (var row in UiVerification.FindAll<ListBoxItem>(immersive.QueueList)) { int index = immersive.QueueList.ItemContainerGenerator.IndexFromContainer(row); if (index >= 0) Check(UiVerification.FindAll<TextBlock>(row).Single(t => t.Name == "RowNumber").Text == (index + 1).ToString(System.Globalization.CultureInfo.CurrentCulture), "Immersive queue number incorrect"); } if (palette.Id is "moon_white" or "ink_blue") UiVerification.Capture((FrameworkElement)immersive.QueuePopup.Child, Path.Combine(Store.Root, "immersive-queue-" + palette.Id + ".png")); immersive.QueuePopup.IsOpen = false; } window.Close(); }
             }
             passed.Add("All 13 themes, main sizes, settings pages, tool tabs and auxiliary windows");
             Store.Write("usability-verification.json", new { Result = "PASS", Passed = passed, Layouts = layouts });
@@ -88,6 +90,52 @@ internal static class UsabilityVerification
         Check(vm.Queue[4] == album[4] && vm.Queue[5] == album[5], "Menu play-next reordered selected songs");
         ((Button)main.FindName("QueueFollowButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Check(queue.SelectedIndex == vm.Index, "Queue locate failed");
         await vm.PlayFromListAsync(album[1], album.Take(3)); await Task.Delay(100); vm.PausePlayback();
+    }
+    private static async Task VerifyNumberedListsAsync(MainWindow main, PlayerViewModel vm, List<Track> album)
+    {
+        var songs = (ListBox)main.FindName("TracksList"); var queue = (ListBox)main.FindName("QueueList");
+        void Inspect(ListBox list)
+        {
+            list.UpdateLayout(); int count = 0;
+            foreach (var row in UiVerification.FindAll<ListBoxItem>(list))
+            {
+                int index = list.ItemContainerGenerator.IndexFromContainer(row); if (index < 0) continue;
+                var number = UiVerification.FindAll<TextBlock>(row).Single(t => t.Name == "RowNumber");
+                Check(number.Text == (index + 1).ToString(System.Globalization.CultureInfo.CurrentCulture), $"Incorrect row number after list change: {list.Name}, index={index}, actual={number.Text}, alternation={ItemsControl.GetAlternationIndex(row)}");
+                Check(number.ActualWidth >= 24 && number.IsVisible, "Row number missing or clipped"); count++;
+            }
+            Check(count > 0, "No rendered numbered rows");
+        }
+        songs.ScrollIntoView(album[^1]); await Task.Delay(50); Inspect(songs);
+        Check(songs.ItemContainerGenerator.ContainerFromIndex(72) != null, "Last numbered song not realized");
+        var view = System.Windows.Data.CollectionViewSource.GetDefaultView(vm.Results); var filter = view.Filter;
+        try { view.Filter = value => value is Track track && track.TrackNumber % 2 == 0; songs.ScrollIntoView(songs.Items[0]); await Task.Delay(50); Inspect(songs); }
+        finally { view.Filter = filter; }
+        songs.ScrollIntoView(album[0]); await Task.Delay(50); Inspect(songs);
+        vm.ReplaceQueue([album[0], album[0], album[1]]); await Task.Delay(50); Inspect(queue);
+        vm.Move(2, 0); await Task.Delay(50); Inspect(queue); vm.Remove(1); await Task.Delay(50); Inspect(queue);
+        await vm.PlayFromListAsync(album[1], album.Take(3)); await Task.Delay(100); vm.PausePlayback();
+    }
+    private static async Task VerifyTaskbarProgressAsync(TaskbarService taskbar, PlayerViewModel vm)
+    {
+        int width = vm.Settings.TaskbarWidth; bool enabled = vm.Settings.TaskbarEnabled;
+        await vm.SetMobileOutputAsync(true); vm.PausePlayback(); vm.Settings.TaskbarEnabled = true;
+        try
+        {
+            foreach (int size in new[] { 240, 316, 480 })
+            {
+                vm.Settings.TaskbarWidth = size;
+                foreach (double fraction in new[] { .5, 1d })
+                {
+                    vm.UpdateMobilePosition(vm.Duration * fraction); taskbar.Refresh(); await Task.Delay(50);
+                    string path = Path.Combine(Store.Root, $"taskbar-progress-{size}-{fraction * 100:0}.png"); taskbar.Capture(path);
+                    using var image = new System.Drawing.Bitmap(path);
+                    bool reachesEdge = Enumerable.Range(Math.Max(0, image.Height - 12), Math.Min(12, image.Height)).Any(y => { var pixel = image.GetPixel(image.Width - 1, y); return pixel.R + pixel.G + pixel.B > 30; });
+                    Check(reachesEdge == (fraction == 1), "Taskbar progress right edge is wrong");
+                }
+            }
+        }
+        finally { vm.Settings.TaskbarWidth = width; vm.Settings.TaskbarEnabled = enabled; vm.UpdateMobilePosition(0); taskbar.Refresh(); await vm.SetMobileOutputAsync(false); vm.PausePlayback(); }
     }
     private static async Task PreparePhoneAsync(App app)
     {

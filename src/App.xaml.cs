@@ -46,7 +46,7 @@ public partial class App : Application
             else if (e.Args.Contains("--qa-netease-ui")) Vm.Run(() => NeteaseVerification.UiAsync(this));
             else if (e.Args.Contains("--qa-quality")) Vm.Run(() => UiVerification.RunQualityAsync(this));
             else if (e.Args.Contains("--qa-immersive")) Vm.Run(() => ImmersiveVerification.RunAsync(this));
-            else if (e.Args.Contains("--qa-usability")) Vm.Run(() => UsabilityVerification.RunAsync(this));
+            else if (e.Args.Contains("--qa-usability")) Vm.Run(() => UsabilityVerification.RunAsync(this, _taskbar));
             else if (_remoteQa) Vm.Run(() => RemoteVerification.RunAsync(this, _taskbar));
             else if (e.Args.Contains("--qa-features")) Vm.Run(() => FeatureUiVerification.RunAsync(this, _taskbar, e.Args.Contains("--qa-quick")));
             else if (e.Args.Contains("--qa-layout")) Vm.Run(() => UiVerification.RunLayoutAsync(this, _taskbar, e.Args.Skip(1).ToArray()));

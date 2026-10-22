@@ -1,5 +1,5 @@
 #ifndef AppVersion
-#define AppVersion "1.3.4"
+#define AppVersion "1.3.5"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist"
@@ -52,6 +52,9 @@ Name: "zhcn"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "快捷方式："
 
+Name: "fileassociation"; Description: "注册为音乐文件打开候选"; GroupDescription: "Windows 集成："; Flags: unchecked
+Name: "foldercontext"; Description: "添加文件夹右键播放入口"; GroupDescription: "Windows 集成："; Flags: unchecked
+
 [Files]
 Source: "{#Payload}chilimusic.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Payload}chilimusic.dll"; DestDir: "{app}"; Flags: ignoreversion
@@ -67,8 +70,63 @@ Source: "{#Payload}README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Payload}CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Payload}LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Payload}licenses\*.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
-Source: "{#Payload}docs\images\main-server.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
+Source: "{#Payload}docs\images\main-product.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
 Source: "{#Payload}docs\images\taskbar-playing.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
+
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\ChiliMusic.Audio"; ValueType: string; ValueData: "chilimusic 音乐文件"; Flags: uninsdeletekey; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\ChiliMusic.Audio\DefaultIcon"; ValueType: string; ValueData: """{app}\chilimusic.exe"",0"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\ChiliMusic.Audio\shell\open\command"; ValueType: string; ValueData: """{app}\chilimusic.exe"" ""%1"""; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities"; ValueName: "ApplicationName"; ValueType: string; ValueData: "chilimusic"; Flags: uninsdeletekey; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueName: "chilimusic"; ValueType: string; ValueData: "Software\ChiliMusic\Capabilities"; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\ChiliMusic"; ValueType: string; ValueData: "使用 chilimusic 播放文件夹"; Flags: uninsdeletekey; Tasks: foldercontext
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\ChiliMusic\command"; ValueType: string; ValueData: """{app}\chilimusic.exe"" ""%1"""; Tasks: foldercontext
+Root: HKCU; Subkey: "Software\Classes\.mp3\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".mp3"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.flac\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".flac"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.ape\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".ape"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.aac\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".aac"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.m4a\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".m4a"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.alac\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".alac"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.wav\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".wav"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.ogg\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".ogg"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.opus\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".opus"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.wma\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".wma"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.dsf\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".dsf"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.dff\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".dff"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.aif\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".aif"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.aiff\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".aiff"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.wv\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".wv"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.tta\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".tta"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.tak\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".tak"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.mpc\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".mpc"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.ac3\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".ac3"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.dts\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".dts"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.cue\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".cue"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.m3u\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".m3u"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\Classes\.m3u8\OpenWithProgids"; ValueName: "ChiliMusic.Audio"; ValueType: string; ValueData: ""; Flags: uninsdeletevalue; Tasks: fileassociation
+Root: HKCU; Subkey: "Software\ChiliMusic\Capabilities\FileAssociations"; ValueName: ".m3u8"; ValueType: string; ValueData: "ChiliMusic.Audio"; Tasks: fileassociation
 
 [Icons]
 Name: "{group}\chilimusic"; Filename: "{app}\chilimusic.exe"; WorkingDir: "{app}"

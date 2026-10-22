@@ -56,6 +56,9 @@ internal static class UsabilityVerification
             await VerifyInteractionsAsync(main, vm, album); passed.Add("Rendered list play, right-click multi-selection, play-next menu and queue location");
             await VerifyNumberedListsAsync(main, vm, album); passed.Add("Row numbers follow filtered views, recycled rows and duplicate queue edits");
             await VerifyTaskbarProgressAsync(taskbar, vm); passed.Add("Taskbar progress reaches the full right edge at all configured widths");
+            await BrowsePositionVerification.RunAsync(app);
+            passed.Add("Browse back restores paged albums, playlists, artists, selections and both scroll positions");
+            await vm.BrowseAsync("专辑 A", item: new LibraryItem("local-album:A", "专辑 A", "歌手", "local-album"));
             await vm.ImportLyricsAsync(lrc);
             foreach (var palette in ThemeCatalog.All)
             {
@@ -106,8 +109,8 @@ internal static class UsabilityVerification
             }
             Check(count > 0, "No rendered numbered rows");
         }
-        songs.ScrollIntoView(album[^1]); await Task.Delay(50); Inspect(songs);
-        Check(songs.ItemContainerGenerator.ContainerFromIndex(72) != null, "Last numbered song not realized");
+        await main.Dispatcher.InvokeAsync(() => main.UpdateLayout(), System.Windows.Threading.DispatcherPriority.ContextIdle); songs.ScrollIntoView(album[^1]); songs.UpdateLayout(); await Task.Delay(80); Inspect(songs);
+        Check(songs.ItemContainerGenerator.ContainerFromIndex(72) != null, $"Last numbered song not realized: count={songs.Items.Count}, visible={songs.IsVisible}, height={songs.ActualHeight}, offset={UiVerification.FindAll<ScrollViewer>(songs).FirstOrDefault()?.VerticalOffset}, lastIndex={songs.Items.IndexOf(album[^1])}, realized={string.Join(",", UiVerification.FindAll<ListBoxItem>(songs).Select(r => songs.ItemContainerGenerator.IndexFromContainer(r)))}");
         var view = System.Windows.Data.CollectionViewSource.GetDefaultView(vm.Results); var filter = view.Filter;
         try { view.Filter = value => value is Track track && track.TrackNumber % 2 == 0; songs.ScrollIntoView(songs.Items[0]); await Task.Delay(50); Inspect(songs); }
         finally { view.Filter = filter; }

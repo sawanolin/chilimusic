@@ -17,10 +17,10 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     public void Changed([CallerMemberName] string? name = null) { PropertyChanged?.Invoke(this, new(name)); if (name == nameof(PlayGlyph)) { PropertyChanged?.Invoke(this, new(nameof(PlayIcon))); Changed(nameof(IsProgressMoving)); } if (name == nameof(Position)) PropertyChanged?.Invoke(this, new(nameof(PositionText))); if (name == nameof(Duration)) PropertyChanged?.Invoke(this, new(nameof(DurationText))); }
     public AppSettings Settings { get; }
     public MusicApiClient Api { get; }
-    public string CatalogSource { get => Settings.CatalogSource; set { value = value == "netease" ? "netease" : "navidrome"; if (value == Settings.CatalogSource) return; Settings.CatalogSource = value; SaveSettings(); Changed(); Changed(nameof(IsNeteaseCatalog)); Changed(nameof(ServerConfigured)); Changed(nameof(CatalogName)); _beforeSearch = null; _browseHistory.Clear(); Changed(nameof(CanGoBack)); Run(() => BrowseAsync("最近添加", remember: false)); } }
+    public string CatalogSource { get => Settings.CatalogSource; set { value = value is "netease" or "local" ? value : "navidrome"; if (value == Settings.CatalogSource) return; Settings.CatalogSource = value; SaveSettings(); Changed(); Changed(nameof(IsNeteaseCatalog)); Changed(nameof(IsLocalCatalog)); Changed(nameof(ServerConfigured)); Changed(nameof(CatalogName)); _beforeSearch = null; _browseHistory.Clear(); Changed(nameof(CanGoBack)); Run(() => BrowseAsync(IsLocalCatalog ? "本地音乐" : "最近添加", remember: false)); } }
     public bool IsNeteaseCatalog => Api.UsingNetease;
-    public string CatalogName => Api.SourceName;
-    public bool ServerConfigured => Api.Configured;
+    public string CatalogName => IsLocalCatalog ? "本地音乐" : Api.SourceName;
+    public bool ServerConfigured => IsLocalCatalog || Api.Configured;
     public MpvPlayerService Player { get; }
     public CoverCacheService Covers { get; }
     public MediaSessionService? Media { get; set; }
@@ -83,7 +83,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     private double _restorePosition;
     public PlayerViewModel(AppSettings settings, string password)
     {
-        Settings = settings; Password = password; Api = new(settings, password); Player = new(settings); Covers = new(Api);
+        Settings = settings; ApplyLyricAppearance(); Password = password; Api = new(settings, password); Player = new(settings); ApplyAudioProcessing(); Covers = new(Api);
         LocalLibrary = new(settings); Lyrics = new(Api); Offline = new(Api, settings); Playlists = new();
         Api.Netease.AccountChanged += OnNeteaseAccountChanged;
         Offline.CacheExtrasAsync = async (track, ct) => { await Covers.GetPathAsync(track.CoverArt, Settings.CoverCacheMb, ct); await Lyrics.LoadAsync(track, ct); };
@@ -92,6 +92,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         _order.Restore(Queue.Count, saved); if (_order.Cursor < 0 && Index >= 0) _order.Record(Index);
         Queue.CollectionChanged += (_, e) =>
         {
+            Changed(nameof(QueueSummary)); Changed(nameof(PrioritySummary));
             if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset) { _order.Reset(Queue.Count); Index = -1; CancelPrepared(); return; }
             int Map(int index) => e.Action switch
             {
@@ -124,34 +125,43 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     }
     public void UpdateSettings(AppSettings updated, string password)
     {
-        bool active = !Player.IsIdle, paused = Player.IsPaused; double position = Player.Position;
-        Player.Stop(); _loaded = false; _timer.Stop(); _playCts.Cancel(); Offline.Cancel(); Offline.ProtectedPath = null;
+        bool active = !Player.IsIdle, paused = Player.IsPaused; double position = Position;
+        bool outputChanged = Settings.AudioDevice != updated.AudioDevice || Settings.Exclusive != updated.Exclusive;
+        bool connectionChanged = Settings.Server != updated.Server || Settings.Username != updated.Username || Password != password || Settings.AllowUntrustedCertificate != updated.AllowUntrustedCertificate;
+        if (outputChanged || connectionChanged) { CancelPrepared(); Player.Stop(); _loaded = false; _timer.Stop(); _playCts.Cancel(); Offline.ProtectedPath = null; }
+        if (connectionChanged) Offline.Cancel();
         bool otherServer = !string.Equals(Settings.Server, updated.Server, StringComparison.OrdinalIgnoreCase) || Settings.Username != updated.Username;
         foreach (var prop in typeof(AppSettings).GetProperties()) prop.SetValue(Settings, prop.GetValue(updated));
-        Password = password; Api.Configure(Settings, password);
+        Password = password; if (connectionChanged) Api.Configure(Settings, password);
         Player.Set("tls-verify", Settings.AllowUntrustedCertificate ? "no" : "yes"); Player.Set("audio-exclusive", Settings.Exclusive ? "yes" : "no");
         Player.Set("audio-device", Settings.AudioDevice); Player.Set("replaygain", Settings.ReplayGain); Player.Set("replaygain-preamp", Settings.ReplayGainPreamp.ToString(System.Globalization.CultureInfo.InvariantCulture)); Player.Set("prefetch-playlist", Settings.PrefetchNext ? "yes" : "no");
         Player.Volume = Settings.Volume; Player.Set("mute", Settings.Mute ? "yes" : "no");
-        if (otherServer) { Queue.Clear(); Index = -1; Results.Clear(); Library.Clear(); Cover = null; SaveQueue(); RefreshTrack(); }
+        if (otherServer) { _browseHistory.Clear(); _beforeSearch = null; Changed(nameof(CanGoBack)); Queue.Clear(); Index = -1; Results.Clear(); Library.Clear(); Cover = null; SaveQueue(); RefreshTrack(); }
         CancelPrepared(); Changed(nameof(Volume)); Changed(nameof(MuteText)); Changed(nameof(PlayGlyph)); Changed(nameof(ServerConfigured)); SaveSettings(); Theme.Apply(Settings.Theme); Theme.SetCoverAccent(Cover as System.Windows.Media.Imaging.BitmapSource, Settings.CoverAccent); Run(Offline.EnforceLimitAsync); SettingsChanged?.Invoke();
-        if (!otherServer && active && Current != null) { _restorePosition = position; Run(async () => { await PlayAsync(Index, true); if (paused) { Player.Pause(); Changed(nameof(PlayGlyph)); } }); }
+        ApplyAudioProcessing(); ApplyLyricAppearance();
+        if (!otherServer && active && Current != null && (outputChanged || connectionChanged)) { _restorePosition = position; Run(async () => { await PlayAsync(Index, true); if (paused) { Player.Pause(); Changed(nameof(PlayGlyph)); } }); }
+        else PrepareNext();
     }
     private void SaveSettingsSoon() { _saveTimer.Stop(); _saveTimer.Start(); }
     public void SaveSettings() => Store.Write("config.json", Settings);
     public void SaveQueue() => Store.Write("queue.json", new QueueState { Tracks = Queue.ToList(), Index = Index, Position = Position, History = _order.History.ToList(), HistoryPosition = _order.Cursor, ShuffleRemaining = _order.Remaining.ToList(), PlayNext = _order.Priority.ToList() });
-    private void RefreshTrack() { Changed(nameof(Current)); Changed(nameof(Title)); Changed(nameof(Artist)); Changed(nameof(Album)); Changed(nameof(FavoriteGlyph)); Changed(nameof(PlayGlyph)); }
+    private void RefreshTrack() { Changed(nameof(QueueSummary)); Changed(nameof(PrioritySummary)); Changed(nameof(Current)); Changed(nameof(Title)); Changed(nameof(Artist)); Changed(nameof(Album)); Changed(nameof(FavoriteGlyph)); Changed(nameof(PlayGlyph)); }
     public async Task PlayAsync(int index, bool resume = false)
     {
         if (index < 0 || index >= Queue.Count) return;
+        ClearPlaybackFailure();
         CancelPrepared(); _order.Record(index);
         _playCts.Cancel(); _playCts.Dispose(); _playCts = new(); var ct = _playCts.Token; var generation = ++_generation;
         Player.Stop(); _timer.Stop(); _loaded = false; _reconnecting = false; _recoveryLoad = false; Index = index; Position = 0; Duration = Current!.Duration; Changed(nameof(Duration));
         _listened = 0; _submitted = false; _mobileHistoryStarted = false; Cover = null; _coverPath = null; Quality = "正在加载"; AudioInfo = ""; _responseType = null; ClearLyrics(); RefreshTrack(); SaveQueue();
-        var track = Current; Status = $"正在加载 · {track.Title}";
+        var track = Current; if (!resume) _recoveryAttempts = 0; Status = $"正在加载 · {track.Title}";
         Offline.ProtectedPath = null;
         if (MobileOutput) { SeekRevision++; Position = resume ? _restorePosition : 0; _restorePosition = 0; MobilePlaying = true; Quality = "手机播放"; Status = "正在手机播放"; RefreshTrack(); SaveQueue(); _ = LoadExtrasAsync(track, generation, ct); return; }
-        if (track.IsLocal) { if (!File.Exists(track.LocalPath)) throw new ApiException("找不到音乐文件，请重新打开。"); Player.Load(track.LocalPath!, resume ? _restorePosition : 0); }
+        try
+        {
+        if (track.IsLocal) { if (!File.Exists(track.LocalPath)) throw new ApiException("找不到音乐文件，请重新打开。"); Player.LoadSegment(track.LocalPath!, track.StartOffset, track.EndOffset, resume ? _restorePosition : 0); }
         else { string? cached = Offline.GetPath(track); if (cached == null && !track.IsNetease && !Api.NavidromeConfigured) throw new ApiException("请先在设置中连接 Navidrome。"); Offline.ProtectedPath = cached; var url = cached ?? await Api.StreamUrlAsync(track, ct); if (generation != _generation || ct.IsCancellationRequested) return; Player.Load(url, resume ? _restorePosition : 0); }
+        } catch (Exception error) when (error is not OperationCanceledException) { SetPlaybackFailure(error is ApiException ? error.Message : "音频加载失败，请重试或跳过此曲。"); throw; }
         _restorePosition = 0;
         _ = LoadExtrasAsync(track, generation, ct);
         await Task.CompletedTask;
@@ -183,8 +193,9 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
             Position = 0; _listened = 0; _submitted = false; _responseType = null; Cover = null; _coverPath = null; ClearLyrics(); RefreshTrack(); SaveQueue(); _ = LoadExtrasAsync(Current!, _generation, _playCts.Token);
         }
         if (_disposed || Current == null) return; _loaded = true; _reconnecting = false; _lastTick = Stopwatch.GetTimestamp(); _timer.Start();
-        if (Current.IsLocal) { foreach (var field in new[] { "title", "artist", "album" }) { var value = Player.Get("metadata/by-key/" + field); if (!string.IsNullOrWhiteSpace(value)) { if (field == "title") Current.Title = value; else if (field == "artist") Current.Artist = value; else Current.Album = value; } } Current.NotifyMetadata(); RefreshTrack(); SaveLocalLibrary(); }
-        Status = Current.Preview ? "正在试听 · 完整播放需要相应权益" : "正在播放"; if (Current.IsNetease) Api.Netease.RecordRecent(Current); Duration = Player.Duration > 0 ? Player.Duration : Current.Duration; if (Current.IsLocal) { Current.Duration = Duration; Current.NotifyMetadata(); SaveLocalLibrary(); }
+        if (Current.IsLocal && Current.CuePath == null) { foreach (var field in new[] { "title", "artist", "album" }) { var value = Player.Get("metadata/by-key/" + field); if (!string.IsNullOrWhiteSpace(value)) { if (field == "title") Current.Title = value; else if (field == "artist") Current.Artist = value; else Current.Album = value; } } Current.NotifyMetadata(); RefreshTrack(); SaveLocalLibrary(); }
+        RecordListening();
+        Status = Current.Preview ? "正在试听 · 完整播放需要相应权益" : "正在播放"; if (Current.IsNetease) Api.Netease.RecordRecent(Current); Duration = Current.EndOffset.HasValue ? Current.EndOffset.Value - Current.StartOffset : Player.Duration > 0 ? Player.Duration - Current.StartOffset : Current.Duration; if (Current.IsLocal) { Current.Duration = Duration; Current.NotifyMetadata(); SaveLocalLibrary(); }
         Changed(nameof(Duration)); Changed(nameof(PlayGlyph)); UpdateAudioInfo();
         PrepareNext();
         Media?.Status(false, false);
@@ -201,14 +212,14 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         Quality = Current.IsNetease ? Current.Preview ? "网易云试听" : "网易云播放" : Current.IsLocal ? "本地播放" : mismatch || httpMismatch ? "服务端转码" : codec.Length > 0 && expected.Length > 0 && !containerAmbiguous && actual == expected ? "Direct Play" : "播放中";
         var rate = Player.Get("audio-params/samplerate"); var sampleFormat = Player.Get("audio-params/format"); var channels = Player.Get("audio-params/channel-count");
         static string Value(int n, string unit) => n > 0 ? $"{n} {unit}" : "—";
-        AudioInfo = $"格式：{Current.Format}\n采样率：{(Current.SamplingRate > 0 ? Value(Current.SamplingRate, "Hz") : rate.Length > 0 ? rate + " Hz" : "—")}\n位深：{Value(Current.BitDepth, "bit")}\n声道：{(Current.ChannelCount > 0 ? Current.ChannelCount.ToString() : channels.Length > 0 ? channels : "—")}\n码率：{Value(Current.BitRate, "kbps")}\n播放：{Quality}\n解码：{(codec.Length > 0 ? codec.ToUpperInvariant() : "—")}\n输出：WASAPI{(Settings.Exclusive ? " 独占" : " 共享")}";
+        Changed(nameof(DetailedOutput)); AudioInfo = $"格式：{Current.Format}\n采样率：{(Current.SamplingRate > 0 ? Value(Current.SamplingRate, "Hz") : rate.Length > 0 ? rate + " Hz" : "—")}\n位深：{Value(Current.BitDepth, "bit")}\n声道：{(Current.ChannelCount > 0 ? Current.ChannelCount.ToString() : channels.Length > 0 ? channels : "—")}\n码率：{Value(Current.BitRate, "kbps")}\n播放：{Quality}\n解码：{(codec.Length > 0 ? codec.ToUpperInvariant() : "—")}\n输出：WASAPI{(Settings.Exclusive ? " 独占" : " 共享")}";
         if (!Current.IsLocal && (mismatch || httpMismatch)) Store.Log("WARNING", "服务器返回的 Content-Type / 编码与源文件不同，可能发生服务器端转码。");
     }
     private void Tick(object? sender, EventArgs e)
     {
         if (!_loaded || Current == null) return;
         var now = Stopwatch.GetTimestamp(); double elapsed = (now - _lastTick) / (double)Stopwatch.Frequency; _lastTick = now;
-        Position = Player.Position; double duration = Player.Duration > 0 ? Player.Duration : Current.Duration; if (Math.Abs(Duration - duration) > .01) { Duration = duration; Changed(nameof(Duration)); }
+        Position = Math.Max(0, Player.Position - Current.StartOffset); double duration = Current.EndOffset.HasValue ? Current.EndOffset.Value - Current.StartOffset : Player.Duration > 0 ? Player.Duration - Current.StartOffset : Current.Duration; if (Math.Abs(Duration - duration) > .01) { Duration = duration; Changed(nameof(Duration)); }
         UpdateLyricPosition();
         bool paused = Player.IsPaused; bool idle = Player.IsIdle; Media?.Status(idle, paused);
         if (!paused && !idle && Player.Get("paused-for-cache") != "yes") _listened += Math.Min(elapsed, 2);
@@ -224,7 +235,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         else if (Player.IsPaused) Player.Resume(); else Player.Pause(); Changed(nameof(PlayGlyph)); Media?.Status(Player.IsIdle, Player.IsPaused);
     }
     public void Stop() { if (MobileOutput) SeekRevision++; MobilePlaying = false; CancelPrepared(); _playCts.Cancel(); _loaded = false; _reconnecting = false; _timer.Stop(); Player.Stop(); Position = 0; _restorePosition = 0; Offline.ProtectedPath = null; Changed(nameof(PlayGlyph)); Media?.Status(true, false); Status = "已停止"; SaveQueue(); }
-    public void Seek(double position) { SeekRevision++; if (MobileOutput) { Position = Math.Clamp(position, 0, Duration); UpdateLyricPosition(); SaveQueue(); } else if (!Player.IsIdle) { Player.Seek(position); Position = position; UpdateLyricPosition(); SaveQueue(); } }
+    public void Seek(double position) { SeekRevision++; if (MobileOutput) { Position = Math.Clamp(position, 0, Duration); UpdateLyricPosition(); SaveQueue(); } else if (!Player.IsIdle) { Player.Seek(position + (Current?.StartOffset ?? 0)); Position = position; UpdateLyricPosition(); SaveQueue(); } }
     public async Task NextAsync(bool automatic)
     {
         if (automatic && _stopAfterCurrent) { CancelSleep(); Stop(); return; }
@@ -245,7 +256,7 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
     }
     public async Task RandomAsync(bool favorites)
     {
-        Status = "正在获取随机歌曲…"; var tracks = Navigation == "本地音乐" || !Api.Configured ? _localTracks.Where(t => !favorites || t.Starred != null).ToList() : favorites ? await Api.StarredAsync() : await Api.RandomAsync();
+        Status = "正在获取随机歌曲…"; var tracks = IsLocalCatalog || Navigation == "本地音乐" || !Api.Configured ? _localTracks.Where(t => !favorites || t.Starred != null).ToList() : favorites ? await Api.StarredAsync() : await Api.RandomAsync();
         if (favorites || Navigation == "本地音乐" || !Api.Configured) Random.Shared.Shuffle(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(tracks));
         if (tracks.Count == 0) { Status = favorites ? "还没有收藏歌曲" : "音乐库中没有歌曲"; return; }
         ReplaceQueue(tracks); await PlayAsync(0);
@@ -265,19 +276,19 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         if (Index == index && (MobileOutput || !Player.IsIdle)) await ResumePlaybackAsync();
         else await PlayAsync(index);
     }
-    public void ReplaceQueue(IEnumerable<Track> tracks) { Stop(); Queue.ReplaceWith(tracks); RefreshTrack(); SaveQueue(); }
+    public void ReplaceQueue(IEnumerable<Track> tracks) { RememberQueue(); Stop(); Queue.ReplaceWith(tracks); RefreshTrack(); SaveQueue(); }
     public void Add(Track track, bool next) => AddRange([track], next);
     public void AddRange(IEnumerable<Track> source, bool next)
     {
-        var tracks = source.ToList(); int index = next && Index >= 0 ? Index + 1 : Queue.Count, first = index;
+        RememberQueue(); var tracks = source.ToList(); int index = next && Index >= 0 ? Index + 1 : Queue.Count, first = index;
         foreach (var track in tracks) Queue.Insert(index++, track);
         if (next) { _order.QueueNext(Enumerable.Range(first, tracks.Count)); PrepareNext(); }
         SaveQueue(); Status = $"已加入{(next ? "下一首" : "队列")} · {tracks.Count} 首";
     }
-    public void Move(int from, int to) { if (from < 0 || to < 0 || from >= Queue.Count || to >= Queue.Count) return; Queue.Move(from, to); SaveQueue(); RefreshTrack(); }
+    public void Move(int from, int to) { if (from < 0 || to < 0 || from >= Queue.Count || to >= Queue.Count) return; RememberQueue(); Queue.Move(from, to); SaveQueue(); RefreshTrack(); }
     public void Remove(int index)
     {
-        if (index < 0 || index >= Queue.Count) return; bool current = index == Index; var active = Current;
+        if (index < 0 || index >= Queue.Count) return; RememberQueue(); bool current = index == Index; var active = Current;
         bool loaded = MobileOutput ? active != null : !Player.IsIdle, playing = MobileOutput ? MobilePlaying : loaded && !Player.IsPaused;
         if (current) Stop(); Queue.RemoveAt(index);
         if (current) Index = Queue.Count == 0 ? -1 : Math.Min(index, Queue.Count - 1);
@@ -285,31 +296,38 @@ public sealed partial class PlayerViewModel : INotifyPropertyChanged, IDisposabl
         RefreshTrack(); SaveQueue();
         if (current && Index >= 0 && loaded) { int next = Index; Run(async () => { await PlayAsync(next); if (!playing) PausePlayback(); }); }
     }
-    public void ClearQueue() { Stop(); Queue.Clear(); Index = -1; Cover = null; Duration = 0; Changed(nameof(Duration)); Quality = "尚未播放"; AudioInfo = ""; ClearLyrics(); SetLyricDocument(0); RefreshTrack(); SaveQueue(); }
+    public void ClearQueue() { RememberQueue(); Stop(); Queue.Clear(); Index = -1; Cover = null; Duration = 0; Changed(nameof(Duration)); Quality = "尚未播放"; AudioInfo = ""; ClearLyrics(); SetLyricDocument(0); RefreshTrack(); SaveQueue(); }
     private async Task ReconnectAsync()
     {
-        if (Current?.IsLocal == true) { Stop(); Status = "无法播放这个文件，请检查文件是否完整。"; return; }
+        if (Current?.IsLocal == true) { SetPlaybackFailure("无法播放这个文件，请检查文件是否完整，或跳过此曲。"); return; }
         if (_reconnecting || Current == null || _disposed) return; _reconnecting = true; _loaded = false; _timer.Stop(); var ct = _playCts.Token; int generation = _generation; double start = Position; bool paused = Player.IsPaused;
         int[] delays = [1, 2, 5, 10, 30]; int attempt = 0;
         try
         {
-            while (!ct.IsCancellationRequested)
+            while (!ct.IsCancellationRequested && _recoveryAttempts < 5)
             {
-                int delay = delays[Math.Min(attempt++, delays.Length - 1)]; Status = $"网络或音频流中断 · {delay} 秒后重连"; await Task.Delay(TimeSpan.FromSeconds(delay), ct);
-                try { var recoveredUrl = await Api.StreamUrlAsync(Current, ct); if (generation != _generation) return; _recoveryLoad = true; Player.Load(recoveredUrl, start); if (paused) Player.Pause(); Status = "正在重新加载音频流…"; return; }
-                catch (ApiException) { Store.Log("WARNING", "网络重连失败"); }
+                int delay = delays[Math.Min(attempt++, delays.Length - 1)]; _recoveryAttempts++; Status = $"网络或音频流中断 · {delay} 秒后重连"; await Task.Delay(TimeSpan.FromSeconds(delay), ct);
+                try { var recoveredUrl = await Api.StreamUrlAsync(Current, ct); if (generation != _generation) return; _recoveryLoad = true; Player.LoadSegment(recoveredUrl, Current.StartOffset, Current.EndOffset, start); if (paused) Player.Pause(); Status = "正在重新加载音频流…"; return; }
+                catch (ApiException error) { if (PermanentFailure(error)) { SetPlaybackFailure(error.Message); return; } Store.Log("WARNING", "网络重连失败"); }
             }
         }
-        finally { _reconnecting = false; }
+        finally { _reconnecting = false; if (_recoveryAttempts >= 5) SetPlaybackFailure("已重试 5 次，请检查网络后重试，或跳过此曲。"); }
     }
     public static readonly HashSet<string> LocalExtensions = new(StringComparer.OrdinalIgnoreCase) { ".mp3", ".flac", ".ape", ".aac", ".m4a", ".alac", ".wav", ".ogg", ".opus", ".wma", ".dsf", ".dff", ".aif", ".aiff", ".wv", ".tta", ".tak", ".mpc", ".ac3", ".dts", ".cue" };
     private void SaveLocalLibrary() => Run(LocalLibrary.PersistAsync);
-    public async Task OpenLocalFilesAsync(IEnumerable<string> paths)
+    public async Task OpenLocalFilesAsync(IEnumerable<string> paths, bool appendOnly = false)
     {
         var files = new List<string>();
-        foreach (var path in paths) { if (Directory.Exists(path)) await LocalLibrary.AddFolderAsync(path); else if (Path.GetExtension(path).Equals(".m3u8", StringComparison.OrdinalIgnoreCase) || Path.GetExtension(path).Equals(".m3u", StringComparison.OrdinalIgnoreCase)) files.AddRange(await PlaylistService.ImportPathsAsync(path)); else files.Add(path); }
-        await LocalLibrary.ImportAsync(files); var full = files.Where(File.Exists).Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase); var added = _localTracks.Where(t => t.LocalPath != null && full.Contains(t.LocalPath)).ToList();
-        await BrowseAsync("本地音乐"); if (added.Count == 0) return; int first = Queue.Count; foreach (var track in added) Queue.Add(track); await PlayAsync(first);
+        foreach (var path in paths)
+        {
+            if (Directory.Exists(path)) { await LocalLibrary.AddFolderAsync(path); string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)) + Path.DirectorySeparatorChar; files.AddRange(LocalLibrary.Snapshot.Where(t => t.LocalPath != null && t.LocalPath.StartsWith(root, StringComparison.OrdinalIgnoreCase)).Select(t => t.CuePath ?? t.LocalPath!)); }
+            else if (Path.GetExtension(path).Equals(".m3u8", StringComparison.OrdinalIgnoreCase) || Path.GetExtension(path).Equals(".m3u", StringComparison.OrdinalIgnoreCase)) files.AddRange(await PlaylistService.ImportPathsAsync(path));
+            else files.Add(path);
+        }
+        await LocalLibrary.ImportAsync(files); var unique = files.Where(File.Exists).Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var added = unique.SelectMany(path => _localTracks.Where(t => t.CuePath != null ? t.CuePath.Equals(path, StringComparison.OrdinalIgnoreCase) : t.LocalPath != null && t.LocalPath.Equals(path, StringComparison.OrdinalIgnoreCase)).OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber)).DistinctBy(t => t.Id).ToList();
+        var cueSources = added.Where(t => t.CuePath != null).Select(t => t.LocalPath).ToHashSet(StringComparer.OrdinalIgnoreCase); added.RemoveAll(t => t.CuePath == null && cueSources.Contains(t.LocalPath));
+        await BrowseAsync("本地音乐"); if (added.Count == 0) return; int first = Queue.Count; AddRange(added, false); if (!appendOnly) await PlayAsync(first);
     }
     private async Task ScrobbleQuietlyAsync(string id, bool submission) { try { await Api.ScrobbleAsync(id, submission); } catch (ApiException) { Store.Log("WARNING", "播放记录暂时无法同步"); } }
     public void Dispose() { if (_disposed) return; SaveQueue(); SaveSettings(); _disposed = true; LocalLibrary.Dispose(); Offline.Dispose(); _sleepTimer.Stop(); _playCts.Cancel(); _browseCts.Cancel(); _timer.Stop(); _saveTimer.Stop(); Media?.Dispose(); Player.Dispose(); Api.Dispose(); _playCts.Dispose(); _browseCts.Dispose(); }

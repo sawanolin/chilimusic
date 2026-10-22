@@ -32,13 +32,13 @@ public static class RowNumbering
         private bool _pending, _disposed;
         public Controller(ListBox list)
         {
-            _list = list; list.Loaded += Changed;
+            _list = list; list.Loaded += Changed; list.LayoutUpdated += Changed;
             list.ItemContainerGenerator.StatusChanged += Changed;
             list.ItemContainerGenerator.ItemsChanged += ItemsChanged;
             list.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(Scrolled));
             Schedule();
         }
-        private void Changed(object? sender, EventArgs args) => Schedule();
+        private void Changed(object? sender, EventArgs args) { Refresh(); Schedule(); }
         private void ItemsChanged(object sender, ItemsChangedEventArgs args) => Schedule();
         private void Scrolled(object sender, ScrollChangedEventArgs args) => Schedule();
         private void Schedule()
@@ -48,9 +48,17 @@ public static class RowNumbering
             _list.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
             {
                 _pending = false; if (_disposed) return;
-                foreach (var row in Rows(_list))
-                    row.SetValue(IndexPropertyKey, _list.ItemContainerGenerator.IndexFromContainer(row));
+                Refresh();
             });
+        }
+        private void Refresh()
+        {
+            if (_disposed) return;
+            foreach (var row in Rows(_list))
+            {
+                int index = _list.ItemContainerGenerator.IndexFromContainer(row);
+                if (GetIndex(row) != index) row.SetValue(IndexPropertyKey, index);
+            }
         }
         private static IEnumerable<ListBoxItem> Rows(DependencyObject parent)
         {
@@ -63,7 +71,7 @@ public static class RowNumbering
         }
         public void Dispose()
         {
-            _disposed = true; _list.Loaded -= Changed;
+            _disposed = true; _list.Loaded -= Changed; _list.LayoutUpdated -= Changed;
             _list.ItemContainerGenerator.StatusChanged -= Changed;
             _list.ItemContainerGenerator.ItemsChanged -= ItemsChanged;
             _list.RemoveHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(Scrolled));

@@ -29,21 +29,23 @@ public partial class App : Application
         if (e.Args.Contains("--qa-netease-network")) { await NeteaseVerification.NetworkAsync(); Shutdown(); return; }
         if (e.Args.Contains("--allow-remote") || e.Args.Contains("--allow-remote-public")) { bool allowed = RemoteFirewall.Allow(e.Args.Contains("--allow-remote-public")); if (!allowed) MessageBox.Show("未能添加连接规则，请在 Windows 防火墙中允许 chilimusic 通过专用网络。", "chilimusic"); Shutdown(allowed ? 0 : 1); return; }
         if (e.Args.Contains("--self-test")) { try { await SelfTest.RunAsync(e.Args); Shutdown(0); } catch (Exception error) { Store.Write("selftest-failure.json", new { Error = error.GetType().Name, Message = error is ApiException ? error.Message : "验收失败" }); Shutdown(1); } return; }
-        if (e.Args.Contains("--qa-remote") || e.Args.Contains("--qa-quality") || e.Args.Contains("--qa-immersive") || e.Args.Contains("--qa-usability") || e.Args.Contains("--qa-netease-ui") || e.Args.Contains("--qa-netease-full")) { FeatureVerification.RequireIsolatedProfile(); _remoteQa = true; }
+        if (e.Args.Contains("--qa-product") || e.Args.Contains("--qa-browse") || e.Args.Contains("--qa-remote") || e.Args.Contains("--qa-quality") || e.Args.Contains("--qa-immersive") || e.Args.Contains("--qa-usability") || e.Args.Contains("--qa-netease-ui") || e.Args.Contains("--qa-netease-full")) { FeatureVerification.RequireIsolatedProfile(); _remoteQa = true; }
         _mutex = new Mutex(true, @"Local\" + InstanceName, out _ownsMutex);
-        if (!_ownsMutex) { try { using var pipe = new NamedPipeClientStream(".", InstanceName, PipeDirection.Out); await pipe.ConnectAsync(2000); await pipe.WriteAsync(new byte[] { 1 }); } catch (IOException) { } catch (TimeoutException) { } Shutdown(); return; }
+        if (!_ownsMutex) { try { using var pipe = new NamedPipeClientStream(".", InstanceName, PipeDirection.Out); await pipe.ConnectAsync(2000); using var writer = new StreamWriter(pipe, System.Text.Encoding.UTF8, leaveOpen: true); await writer.WriteLineAsync(System.Text.Json.JsonSerializer.Serialize(e.Args.Where(IsFileArgument).ToArray())); await writer.FlushAsync(); } catch (IOException) { } catch (TimeoutException) { } Shutdown(); return; }
         DispatcherUnhandledException += (_, args) => { Store.Log("ERROR", $"UI 异常 {args.Exception.GetType().Name}"); if (Vm != null) Vm.Status = "操作发生异常，请重试。"; args.Handled = true; };
         try
         {
-            var settings = Store.Read("config.json", new AppSettings()); string password = "";
+            var settings = Store.Read("config.json", new AppSettings()); if (settings.CatalogSource == "navidrome" && string.IsNullOrWhiteSpace(settings.Server)) settings.CatalogSource = "local"; if (e.Args.Contains("--qa-usability") || e.Args.Contains("--qa-browse")) settings.DetailedTracks = false; string password = "";
             try { password = CredentialService.Unprotect(settings.ProtectedPassword); } catch { Store.Log("WARNING", "无法解密已有账户，请重新登录。"); }
             if (settings.StartWithWindows && !e.Args.Any(arg => arg.StartsWith("--qa", StringComparison.Ordinal))) Store.SetStartup(true);
             NativeFonts.Initialize(); Theme.Apply(settings.Theme); Vm = new(settings, password); _mini = new(Vm); new WindowInteropHelper(_mini).EnsureHandle();
             Remote = new(Vm);
             try { Vm.Media = new(new WindowInteropHelper(_mini).Handle); Vm.Media.ButtonPressed += button => Dispatcher.BeginInvoke(() => OnMedia(button)); } catch (Exception ex) { Vm.Status = "系统媒体控制初始化失败"; Store.Log("ERROR", $"SMTC 初始化失败 {ex.GetType().Name}"); }
             CreateTray(); _taskbar = new(Vm, this); Vm.SettingsChanged += OnSettingsChanged; Store.Write("taskbar-diagnostics.json", _taskbar.Diagnostics()); _functionKeys = new(Vm); SystemEvents.UserPreferenceChanged += OnPreferences; _ = ListenAsync();
-            if (e.Args.Contains("--qa-netease-full")) Vm.Run(() => NeteaseVerification.FullAsync(this));
+            if (e.Args.Contains("--qa-product")) Vm.Run(() => ProductVerification.RunAsync(this));
+            else if (e.Args.Contains("--qa-netease-full")) Vm.Run(() => NeteaseVerification.FullAsync(this));
             else if (e.Args.Contains("--qa-netease-ui")) Vm.Run(() => NeteaseVerification.UiAsync(this));
+            else if (e.Args.Contains("--qa-browse")) Vm.Run(() => BrowsePositionVerification.RunStandaloneAsync(this));
             else if (e.Args.Contains("--qa-quality")) Vm.Run(() => UiVerification.RunQualityAsync(this));
             else if (e.Args.Contains("--qa-immersive")) Vm.Run(() => ImmersiveVerification.RunAsync(this));
             else if (e.Args.Contains("--qa-usability")) Vm.Run(() => UsabilityVerification.RunAsync(this, _taskbar));
@@ -51,6 +53,7 @@ public partial class App : Application
             else if (e.Args.Contains("--qa-features")) Vm.Run(() => FeatureUiVerification.RunAsync(this, _taskbar, e.Args.Contains("--qa-quick")));
             else if (e.Args.Contains("--qa-layout")) Vm.Run(() => UiVerification.RunLayoutAsync(this, _taskbar, e.Args.Skip(1).ToArray()));
             else if (e.Args.Contains("--qa-local")) Vm.Run(() => UiVerification.RunLocalAsync(this, e.Args.Skip(1).ToArray()));
+            else if (e.Args.Any(IsFileArgument)) { ShowMain(); Vm.Run(() => OpenExternalAsync(e.Args.Where(IsFileArgument).ToArray())); }
             else if (Vm.Api.Configured) { if (e.Args.Contains("--qa-ui")) Vm.Run(() => UiVerification.RunAsync(this, _taskbar)); else { Vm.Run(Vm.ConnectAsync); if (!settings.StartInTray) ShowMain(); } } else ShowMain();
         }
         catch (Exception ex)
@@ -93,11 +96,18 @@ public partial class App : Application
         while (!_exitCts.IsCancellationRequested) try
             {
                 using var pipe = new NamedPipeServerStream(InstanceName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-                await pipe.WaitForConnectionAsync(_exitCts.Token); var bytes = new byte[1]; if (await pipe.ReadAsync(bytes, _exitCts.Token) > 0) _ = Dispatcher.BeginInvoke(ShowMini);
+                await pipe.WaitForConnectionAsync(_exitCts.Token);
+                using var reader = new StreamReader(pipe, System.Text.Encoding.UTF8); using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_exitCts.Token); timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                string? line = await reader.ReadLineAsync(timeout.Token); string[] paths = [];
+                try { if (line != null && line.Length < 65536) paths = System.Text.Json.JsonSerializer.Deserialize<string[]>(line) ?? []; } catch (System.Text.Json.JsonException) { }
+                var selected = paths.Where(IsFileArgument).Take(1000).ToArray();
+                _ = Dispatcher.BeginInvoke(() => { if (selected.Length == 0) ShowMini(); else { ShowMain(); Vm.Run(() => OpenExternalAsync(selected)); } });
             }
-            catch (OperationCanceledException) { break; }
+            catch (OperationCanceledException) { if (_exitCts.IsCancellationRequested) break; }
             catch (IOException) { if (!_exitCts.IsCancellationRequested) await Task.Delay(250); }
     }
+    private static bool IsFileArgument(string arg) => !arg.StartsWith("--", StringComparison.Ordinal) && (File.Exists(arg) || Directory.Exists(arg));
+    private Task OpenExternalAsync(string[] paths) => Vm.OpenLocalFilesAsync(paths, Vm.Settings.FileOpenAction == "append");
     public void ShowMini() { if (_mini != null) _mini.Popup(); }
     public void ShowTrayMenu() => _trayMenu?.Show(System.Windows.Forms.Cursor.Position);
     internal void CaptureTrayMenu(string path) { if (_trayMenu == null) return; _trayMenu.Show(new System.Drawing.Point(50, 50)); using var bitmap = new System.Drawing.Bitmap(_trayMenu.Width, _trayMenu.Height); _trayMenu.DrawToBitmap(bitmap, new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height)); bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png); _trayMenu.Hide(); }
@@ -118,7 +128,7 @@ public partial class App : Application
     }
     public void ShowMain(bool queue = false, bool search = false)
     {
-        _mini?.Hide(); bool created = _main == null; _main ??= new(Vm); _main.Show(); _main.WindowState = WindowState.Normal; _main.Activate(); if (created) Vm.Run(() => Vm.BrowseAsync(Vm.Api.Configured ? "最近添加" : "本地音乐")); if (queue) _main.FocusQueue(); if (search) _main.FocusSearch();
+        _mini?.Hide(); bool created = _main == null; _main ??= new(Vm); _main.Show(); _main.WindowState = WindowState.Normal; _main.Activate(); if (created) Vm.Run(() => Vm.BrowseAsync(Vm.Settings.LastSection is "最近添加" or "专辑" or "歌手" or "歌单" or "本地音乐" or "离线音乐" or "本机历史" ? Vm.Settings.LastSection : Vm.IsLocalCatalog ? "本地音乐" : "最近添加")); if (queue) _main.FocusQueue(); if (search) _main.FocusSearch();
     }
     public void ShowSettings() { _mini?.Hide(); if (_settingsWindow != null) { _settingsWindow.Activate(); return; } _settingsWindow = new(Vm); _settingsWindow.Closed += (_, _) => _settingsWindow = null; _settingsWindow.Show(); }
     public void ShowRemote() { if (_remoteWindow == null) { _remoteWindow = new(Remote); _remoteWindow.Closed += (_, _) => _remoteWindow = null; } _remoteWindow.Show(); _remoteWindow.Activate(); }

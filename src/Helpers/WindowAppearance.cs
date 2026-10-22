@@ -22,7 +22,7 @@ internal static class WindowAppearance
         window.UseLayoutRounding = true;
         window.SnapsToDevicePixels = true;
         window.SourceInitialized += (_, _) => Apply(window);
-        window.Loaded += (_, _) => Apply(window);
+        window.Loaded += (_, _) => { Apply(window); MainWindow.NameAccessibleControls(window); };
         window.SizeChanged += (_, _) => Apply(window);
         window.StateChanged += (_, _) => { Apply(window); window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => FitWorkArea(window)); };
         if (window.Content is Border surface)

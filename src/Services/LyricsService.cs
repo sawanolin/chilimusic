@@ -33,8 +33,8 @@ public sealed class LyricsService(NavidromeApiClient api)
         if (track.IsLocal)
         {
             var lrc = Path.ChangeExtension(track.LocalPath!, ".lrc");
-            if (File.Exists(lrc)) return [Parse(await ReadTextAsync(lrc, ct))];
-            if (!string.IsNullOrWhiteSpace(track.EmbeddedLyrics)) return [Parse(track.EmbeddedLyrics)];
+            if (File.Exists(lrc)) return [SegmentLyrics(track, Parse(await ReadTextAsync(lrc, ct)))];
+            if (!string.IsNullOrWhiteSpace(track.EmbeddedLyrics)) return [SegmentLyrics(track, Parse(track.EmbeddedLyrics))];
             return await SupplementAsync(track, cached, ct);
         }
         if (track.IsNetease && api is MusicApiClient music) { var documents = await music.Netease.LyricsAsync(track.Id, ct); if (documents.Count > 0) Store.Write(cached, documents); return documents; }
@@ -66,6 +66,12 @@ public sealed class LyricsService(NavidromeApiClient api)
         }
         catch (ApiException) { }
         return [];
+    }
+    internal static LyricsDocument SegmentLyrics(Track track, LyricsDocument document)
+    {
+        if (track.CuePath == null) return document;
+        var lines = document.Lines.Where(l => l.Time == null || l.Time >= track.StartOffset && (!track.EndOffset.HasValue || l.Time < track.EndOffset)).Select(l => new LyricLine(l.Time - track.StartOffset, l.Text, l.Translation)).ToList();
+        var previous = document.Lines.LastOrDefault(l => l.Time < track.StartOffset); if (previous != null && !lines.Any(l => l.Time == 0)) lines.Insert(0, new(0, previous.Text, previous.Translation)); return document with { Lines = lines };
     }
     public static LyricsDocument Parse(string text)
     {

@@ -31,12 +31,13 @@ public sealed class FunctionKeyService : IDisposable
         if (!_vm.Settings.HotkeysEnabled) return CallNextHookEx(_hook, code, message, ptr);
         bool play = !otherModifier && (key.Vk == _vm.Settings.PlayKey && !_winHeld || (_vm.Settings.RemapHardwareShortcuts && _winHeld && key.Vk == 0x50));
         bool pause = !otherModifier && (key.Vk == _vm.Settings.PauseKey && !_winHeld || (_vm.Settings.RemapHardwareShortcuts && _winHeld && key.Vk == 0xbe));
-        if (down && (play || pause))
+        int extra = !otherModifier && !_winHeld ? key.Vk == _vm.Settings.NextKey && key.Vk != 0 ? 1 : key.Vk == _vm.Settings.PreviousKey && key.Vk != 0 ? 2 : key.Vk == _vm.Settings.VolumeUpKey && key.Vk != 0 ? 3 : key.Vk == _vm.Settings.VolumeDownKey && key.Vk != 0 ? 4 : 0 : 0;
+        if (down && (play || pause || extra != 0))
         {
             if (_blocked.Add(key.Vk))
             {
                 if (_winHeld) MaskWindowsMenu();
-                Application.Current.Dispatcher.BeginInvoke(() => { if (play) _vm.Run(PlayAsync); else { _vm.PausePlayback(); _vm.Changed(nameof(_vm.PlayGlyph)); _vm.Status = "已暂停"; } });
+                Application.Current.Dispatcher.BeginInvoke(() => { if (extra == 1) _vm.Run(() => _vm.NextAsync(false)); else if (extra == 2) _vm.Run(_vm.PreviousAsync); else if (extra == 3) _vm.Volume += 5; else if (extra == 4) _vm.Volume -= 5; else if (play) _vm.Run(PlayAsync); else { _vm.PausePlayback(); _vm.Changed(nameof(_vm.PlayGlyph)); _vm.Status = "已暂停"; } });
             }
             return new IntPtr(1);
         }

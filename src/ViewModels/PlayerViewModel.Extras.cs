@@ -107,20 +107,28 @@ public sealed partial class PlayerViewModel
         }
         Changed(nameof(SleepStatus));
     }
-    private void CancelPrepared() { _preparedIndex = -1; Offline.PreparedPath = null; if (!_disposed) Player.PrepareNext(null); }
-    private void PrepareNext()
+    private int _prepareRevision;
+    private void CancelPrepared() { _prepareRevision++; _preparedIndex = -1; Offline.PreparedPath = null; if (!_disposed) Player.PrepareNext(null); }
+    private async void PrepareNext()
     {
         if (!_loaded || Player.IsIdle || _stopAfterCurrent || !Settings.PrefetchNext) { CancelPrepared(); return; }
         int next = _order.PeekNext(Index, Settings.Mode, true);
         if (next < 0 || next == Index) { CancelPrepared(); return; }
-        var track = Queue[next]; if (track.IsNetease) { CancelPrepared(); return; } string? url = track.IsLocal ? File.Exists(track.LocalPath) ? track.LocalPath : null : Offline.GetPath(track) ?? (Api.Configured ? Api.Url("stream", ("id", track.Id)) : null);
-        Offline.PreparedPath = track.IsLocal ? null : Offline.GetPath(track); _preparedIndex = url == null ? -1 : next; Player.PrepareNext(url);
+        var track = Queue[next]; int generation = _generation, revision = ++_prepareRevision;
+        try {
+            string? url = track.IsLocal ? File.Exists(track.LocalPath) ? track.LocalPath : null : Offline.GetPath(track) ?? await Api.StreamUrlAsync(track, _playCts.Token);
+            if (_disposed || generation != _generation || revision != _prepareRevision || next >= Queue.Count || !ReferenceEquals(Queue[next], track) || next != _order.PeekNext(Index, Settings.Mode, true) || _stopAfterCurrent) return;
+            Offline.PreparedPath = track.IsLocal ? null : Offline.GetPath(track); _preparedIndex = url == null ? -1 : next; Player.PrepareNextSegment(url, track.StartOffset, track.EndOffset);
+        } catch (OperationCanceledException) { } catch (Exception error) { if (generation == _generation) { CancelPrepared(); Store.Log("WARNING", "下一首预加载未完成 " + error.GetType().Name); } }
     }
     private async Task RecoverDeviceOrNetworkAsync()
     {
         CancelPrepared(); if (Settings.AudioDevice != "auto" && !Player.AudioDevices().Any(d => d.Name == Settings.AudioDevice))
         {
-            Settings.AudioDevice = "auto"; Player.Set("audio-device", "auto"); SaveSettings(); Status = "输出设备已断开，改用系统默认设备"; if (Index >= 0) await PlayAsync(Index); return;
+            double savedPosition = Position; bool paused = Player.IsPaused;
+            if (Settings.DeviceDisconnectPause) { PausePlayback(); SetPlaybackFailure("输出设备已断开，重新连接设备后点击重试。"); return; }
+            Settings.AudioDevice = "auto"; Player.Set("audio-device", "auto"); SaveSettings();
+            _restorePosition = savedPosition; if (Index >= 0) { await PlayAsync(Index, true); if (paused) PausePlayback(); } Status = "输出设备已断开，已从原进度切到系统默认设备"; return;
         }
         await ReconnectAsync();
     }

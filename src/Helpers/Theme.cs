@@ -19,6 +19,7 @@ public static class Theme
         string[] keys = ["BackgroundBrush", "SurfaceBrush", "TextBrush", "MutedBrush", "BorderBrush", "HoverBrush", "AccentBrush"];
         for (int i = 0; i < keys.Length; i++) { var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(colors[i])); brush.Freeze(); Application.Current.Resources[keys[i]] = brush; }
         Application.Current.Resources["InputBrush"] = new SolidColorBrush(Parse(Current.Input));
+        Application.Current.Resources[System.Windows.SystemColors.ControlBrushKey] = new SolidColorBrush(Parse(Current.Surface));
         Application.Current.Resources["MutedBrush"] = new SolidColorBrush(Readable(Parse(Current.Muted), Parse(Current.Background), Parse(Current.Surface), Parse(Current.Selected)));
         ApplyAccent();
         foreach (var window in Application.Current.Windows.Cast<System.Windows.Window>()) WindowAppearance.Apply(window);
@@ -55,6 +56,7 @@ public static class Theme
         // Keep text readable on the filled buttons for both themes and cover accents.
         var darkText = Color.FromRgb(14, 23, 40);
         bool white = Contrast(fill, Colors.White) >= Contrast(fill, darkText);
+        if (Current.Id == "moon_white" && _coverAccent == null) { white = true; for (int i = 0; i < 12 && Contrast(fill, Colors.White) < 4.5; i++) fill = Blend(fill, Colors.Black, .025); }
         if (!white && Contrast(fill, darkText) < 4.5) darkText = Colors.Black;
         Color Mix(Color color, double amount) => Color.FromRgb((byte)(color.R * (1 - amount) + (white ? 0 : 255) * amount), (byte)(color.G * (1 - amount) + (white ? 0 : 255) * amount), (byte)(color.B * (1 - amount) + (white ? 0 : 255) * amount));
         Set("AccentFillBrush", fill); Set("AccentForegroundBrush", white ? Colors.White : darkText); Set("AccentHoverBrush", Mix(fill, .10)); Set("AccentPressedBrush", Mix(fill, .18));

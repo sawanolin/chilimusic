@@ -28,7 +28,8 @@ internal sealed partial class RemoteControlService : IDisposable
     public int Port => _server?.Port ?? 47831;
     public string PairCode { get { lock (_auth) return _code; } }
     public int Devices { get { lock (_auth) { PruneSessions(); return _sessions.Count; } } }
-    public RemoteControlService(PlayerViewModel vm) { _vm = vm; vm.Queue.CollectionChanged += QueueChanged; }
+    private readonly DispatcherTimer _lease = new() { Interval = TimeSpan.FromSeconds(5) };
+    public RemoteControlService(PlayerViewModel vm) { _vm = vm; vm.Queue.CollectionChanged += QueueChanged; _lease.Tick += (_, _) => { if (!_vm.MobileOutput || !_vm.MobilePlaying || _mobileOwner == null) return; lock (_auth) { if (!_sessions.TryGetValue(_mobileOwner, out var last) || DateTime.UtcNow - last > TimeSpan.FromSeconds(20)) { _vm.PausePlayback(); _vm.Status = "手机连接中断，已保留播放进度；重连后点击播放"; } } }; _lease.Start(); }
     private void QueueChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) => _revision++;
     public void Start(int port = 47831)
     {
@@ -131,7 +132,7 @@ internal sealed partial class RemoteControlService : IDisposable
         key = Guid.NewGuid().ToString("N"); _keys[track] = key; _tracks[key] = track; return key;
     }
     private static string? LocalCoverPath(Track track) => track.EmbeddedCoverPath ?? new[] { "cover.jpg", "folder.jpg", "cover.png", "folder.png" }.Select(n => Path.Combine(Path.GetDirectoryName(track.LocalPath!)!, n)).FirstOrDefault(File.Exists);
-    private object Song(Track track, int? index = null) => new { key = Key(track), index, title = track.Title, artist = track.Artist, album = track.Album, duration = track.Duration, format = track.Format, preview = track.Preview, local = track.IsLocal, favorite = track.Starred != null, cover = track.IsLocal ? LocalCoverPath(track) != null || _vm.Current == track && _vm.Cover != null : !string.IsNullOrEmpty(track.CoverArt) };
+    private object Song(Track track, int? index = null) => new { key = Key(track), index, title = track.Title, artist = track.Artist, album = track.Album, duration = track.Duration, startOffset = track.StartOffset, endOffset = track.EndOffset, format = track.Format, preview = track.Preview, local = track.IsLocal, favorite = track.Starred != null, cover = track.IsLocal ? LocalCoverPath(track) != null || _vm.Current == track && _vm.Cover != null : !string.IsNullOrEmpty(track.CoverArt) };
     private string Context(IEnumerable<Track> source, string? previous = null)
     {
         var tracks = source.ToList();
@@ -149,7 +150,7 @@ internal sealed partial class RemoteControlService : IDisposable
         {
             var all = source == "offline" ? _vm.OfflineEntries.Select(e => e.Track) : _vm.LocalLibrary.Snapshot.AsEnumerable();
             if (source == "favorite") all = all.Where(t => t.Starred != null);
-            var matches = all.Where(t => (t.Title + " " + t.Artist + " " + t.Album).Contains(term, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+            var matches = all.Where(t => SearchText.Matches(t.Title + " " + t.Artist + " " + t.Album, term)).ToArray();
             return new { tracks = matches.Skip(offset).Take(50).Select(t => Song(t)).ToArray(), albums = Array.Empty<object>(), more = offset + 50 < matches.Length, offset, context = Context(matches) };
         }
         if (source is not ("server" or "netease") || source == "server" && !_vm.Api.NavidromeConfigured) throw new ApiException("服务器未连接");
@@ -225,6 +226,6 @@ internal sealed partial class RemoteControlService : IDisposable
             default: throw new ArgumentException();
         }
     }
-    public void Dispose() { Stop(); _vm.Queue.CollectionChanged -= QueueChanged; }
+    public void Dispose() { _lease.Stop(); Stop(); _vm.Queue.CollectionChanged -= QueueChanged; }
     private sealed class RemoteConflictException : Exception { }
 }

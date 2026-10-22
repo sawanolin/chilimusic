@@ -13,8 +13,8 @@ public sealed class MusicApiClient : NavidromeApiClient
     public Task<JsonElement> CallSourceAsync(string source, string endpoint, CancellationToken ct = default, params (string Key, string Value)[] args) => source == "netease" ? Netease.SubsonicAsync(endpoint, args, ct) : base.CallAsync(endpoint, ct, args);
     public string SourceName => UsingNetease ? "网易云音乐" : "Navidrome";
     public override bool Configured => UsingNetease || base.Configured;
-    public override string ScopeForId(string id) => id.StartsWith("ncm", StringComparison.Ordinal) ? "netease\0" + Netease.UserId : base.CacheScope;
-    public override bool CacheScopeAllowed(string scope) => scope == base.CacheScope || scope == ScopeForId("ncm:");
+    public override string ScopeForId(string id) => id.StartsWith("local:", StringComparison.Ordinal) || id.StartsWith("cue:", StringComparison.Ordinal) ? "local" : id.StartsWith("ncm", StringComparison.Ordinal) ? "netease\0" + Netease.UserId : base.CacheScope;
+    public override bool CacheScopeAllowed(string scope) => scope == "local" || scope == base.CacheScope || scope == ScopeForId("ncm:");
     public override Task<string> StreamUrlAsync(Track track, CancellationToken ct = default) => track.IsNetease ? Netease.ResolveUrlAsync(track, settings.NeteaseQuality, false, ct) : base.StreamUrlAsync(track, ct);
     public override string Url(string endpoint, params (string Key, string Value)[] args)
     {

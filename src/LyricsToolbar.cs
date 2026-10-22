@@ -15,7 +15,7 @@ internal sealed class LyricsToolbar : WrapPanel
     private List<int> _choices = [];
     internal LyricsToolbar(PlayerViewModel vm, bool compact = false)
     {
-        _vm = vm; DataContext = vm;
+        _vm = vm; DataContext = vm; Children.Add(UiFactory.Button("外观", () => new ProductOptionsWindow(vm, true) { Owner = Window.GetWindow(this) }.ShowDialog()));
         Children.Add(_language); _language.SelectionChanged += (_, _) => { if (!_refreshing && _language.SelectedIndex >= 0 && _language.SelectedIndex < _choices.Count) vm.SetLyricDocument(_choices[_language.SelectedIndex]); };
         Loaded += (_, _) => { vm.PropertyChanged += Changed; Refresh(); }; Unloaded += (_, _) => vm.PropertyChanged -= Changed;
         if (compact) { MakeCompact(vm); return; }

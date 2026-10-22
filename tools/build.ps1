@@ -14,4 +14,6 @@ if (Test-Path -LiteralPath $localSdk) {
 if ($LASTEXITCODE -ne 0) { throw '编译失败' }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md'),(Join-Path $projectRoot 'CHANGELOG.md'),(Join-Path $projectRoot 'LICENSE.txt') -Destination $OutputDirectory
 Copy-Item -LiteralPath (Join-Path $projectRoot 'licenses') -Destination $OutputDirectory -Recurse -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot 'docs') -Destination $OutputDirectory -Recurse -Force
+$imageDirectory = Join-Path $OutputDirectory 'docs\images'
+New-Item -ItemType Directory -Path $imageDirectory -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\images\main-product.png'),(Join-Path $projectRoot 'docs\images\taskbar-playing.png') -Destination $imageDirectory -Force

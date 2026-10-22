@@ -21,6 +21,12 @@ public sealed class LocalLibraryService : IDisposable
     {
         var tracks = await Task.Run(() => Store.Read("local-library.json", new List<Track>()), _lifetime.Token);
         lock (_tracksLock) _tracks = tracks;
+        if (Store.Read("local-library-schema.json", 0) < 1)
+        {
+            var files = tracks.Select(t => t.CuePath ?? t.LocalPath).OfType<string>().Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            await Task.Run(() => Merge(files, false, forceRead: true), _lifetime.Token);
+            await PersistAsync(); Store.Write("local-library-schema.json", 1);
+        }
         Updated?.Invoke(Snapshot); RebuildWatchers();
         if (_settings.MusicFolders.Count > 0) await ScanCoreAsync();
     }
@@ -60,35 +66,51 @@ public sealed class LocalLibraryService : IDisposable
         }
         finally { _scanGate.Release(); }
     }
-    private void Merge(List<string> files, bool markMissing, string[]? roots = null)
+    private void Merge(List<string> files, bool markMissing, string[]? roots = null, bool forceRead = false)
     {
         lock (_tracksLock)
         {
-        var byPath = _tracks.Where(t => t.LocalPath != null).GroupBy(t => t.LocalPath!, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var byId = _tracks.GroupBy(t => t.Id).ToDictionary(g => g.Key, g => g.First());
         var byFingerprint = _tracks.Where(t => t.Fingerprint.Length > 0).GroupBy(t => t.Fingerprint).ToDictionary(g => g.Key, g => g.First());
-        if (markMissing) foreach (var t in _tracks.Where(t => t.LocalPath != null && (roots ?? []).Any(root => Within(t.LocalPath!, root)))) t.Missing = !File.Exists(t.LocalPath);
+        if (markMissing) foreach (var t in _tracks.Where(t => t.LocalPath != null && (roots ?? []).Any(root => Within(t.LocalPath!, root)))) t.Missing = !File.Exists(t.LocalPath) || t.CuePath != null && !File.Exists(t.CuePath);
         int count = 0;
         foreach (var path in files)
         {
             _lifetime.Token.ThrowIfCancellationRequested();
             try
             {
-                var info = new FileInfo(path); byPath.TryGetValue(path, out var old);
-                if (old != null && old.FileSize == info.Length && old.FileModifiedUtc == info.LastWriteTimeUtc && old.Fingerprint.StartsWith("sha256:")) { old.Missing = false; continue; }
-                var fresh = ReadTrack(path);
-                if (old == null && byFingerprint.TryGetValue(fresh.Fingerprint, out var same))
+                var info = new FileInfo(path);
+                var existing = _tracks.FirstOrDefault(t => t.CuePath == null && t.LocalPath != null && t.LocalPath.Equals(path, StringComparison.OrdinalIgnoreCase));
+                if (!forceRead && existing != null && existing.FileSize == info.Length && existing.FileModifiedUtc == info.LastWriteTimeUtc && existing.Fingerprint.StartsWith("sha256:")) { existing.Missing = false; continue; }
+                var freshTracks = Path.GetExtension(path).Equals(".cue", StringComparison.OrdinalIgnoreCase) ? CueSheet.Read(path) : new List<Track> { ReadTrack(path) };
+                if (Path.GetExtension(path).Equals(".cue", StringComparison.OrdinalIgnoreCase)) _tracks.RemoveAll(t => t.CuePath == path && !freshTracks.Any(f => f.Id == t.Id));
+                foreach (var fresh in freshTracks)
                 {
-                    if (!File.Exists(same.LocalPath)) old = same; else continue;
+                    byId.TryGetValue(fresh.Id, out var old);
+                    old ??= fresh.CuePath == null ? existing : null;
+                    if (old == null && byFingerprint.TryGetValue(fresh.Fingerprint, out var same)) { if (!File.Exists(same.LocalPath)) old = same; else continue; }
+                    if (old != null) { fresh.Id = old.Id; fresh.Starred = old.Starred; int index = _tracks.IndexOf(old); if (index >= 0) _tracks[index] = fresh; else _tracks.Add(fresh); }
+                    else _tracks.Add(fresh);
+                    byId[fresh.Id] = fresh; byFingerprint[fresh.Fingerprint] = fresh;
                 }
-                if (old != null) { fresh.Id = old.Id; fresh.Starred = old.Starred; int index = _tracks.IndexOf(old); _tracks[index] = fresh; }
-                else _tracks.Add(fresh);
-                byPath[path] = fresh; byFingerprint[fresh.Fingerprint] = fresh;
-                if (++count % 25 == 0) Progress?.Invoke($"正在整理本地音乐 · {count} 首");
+                if (++count % 25 == 0) Progress?.Invoke($"正在整理本地音乐 · {count} 个文件");
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Store.Log("WARNING", "音乐文件暂时无法读取"); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ApiException) { Store.Log("WARNING", "音乐文件暂时无法读取 " + e.GetType().Name); }
         }
         }
     }
+    public async Task RelocateAsync(Track track, string path)
+    {
+        await InitializeAsync(); await _scanGate.WaitAsync(_lifetime.Token);
+        try
+        {
+            var fresh = await Task.Run(() => ReadTrack(path)); fresh.Id = track.Id; fresh.Starred = track.Starred;
+            lock (_tracksLock) { int index = _tracks.FindIndex(t => t.Id == track.Id); if (index >= 0) _tracks[index] = fresh; }
+            await PersistAsync(); Updated?.Invoke(Snapshot);
+        }
+        finally { _scanGate.Release(); }
+    }
+    public Task<List<string[]>> FindDuplicatesAsync() => Task.Run(() => _settings.MusicFolders.ToArray().SelectMany(EnumerateMusic).Where(p => !p.EndsWith(".cue", StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).GroupBy(p => new FileInfo(p).Length).Where(g => g.Count() > 1).SelectMany(g => g.GroupBy(Fingerprint)).Where(g => g.Count() > 1).Select(g => g.ToArray()).ToList(), _lifetime.Token);
     public static Track ReadTrack(string path)
     {
         path = Path.GetFullPath(path); var info = new FileInfo(path);
@@ -99,7 +121,7 @@ public sealed class LocalLibraryService : IDisposable
             if (!string.IsNullOrWhiteSpace(tag.Title)) track.Title = tag.Title;
             if (tag.Performers.Length > 0) track.Artist = string.Join(" / ", tag.Performers);
             if (!string.IsNullOrWhiteSpace(tag.Album)) track.Album = tag.Album;
-            track.TrackNumber = tag.Track; track.DiscNumber = tag.Disc; track.Year = tag.Year; track.Genre = string.Join(" / ", tag.Genres);
+            track.AlbumArtist = string.Join(" / ", tag.AlbumArtists); track.Edition = tag.MusicBrainzReleaseId ?? ""; track.TrackNumber = tag.Track; track.DiscNumber = tag.Disc; track.Year = tag.Year; track.Genre = string.Join(" / ", tag.Genres);
             track.Duration = file.Properties.Duration.TotalSeconds; track.BitRate = file.Properties.AudioBitrate; track.SamplingRate = file.Properties.AudioSampleRate; track.ChannelCount = file.Properties.AudioChannels; track.BitDepth = file.Properties.BitsPerSample;
             track.EmbeddedLyrics = tag.Lyrics is { Length: <= 262144 } ? tag.Lyrics : null;
             var picture = tag.Pictures.FirstOrDefault(p => p.Type == TagLib.PictureType.FrontCover) ?? tag.Pictures.FirstOrDefault();

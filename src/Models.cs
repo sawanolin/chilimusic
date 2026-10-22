@@ -12,6 +12,14 @@ public sealed class Track : System.ComponentModel.INotifyPropertyChanged
     public string Title { get; set; } = "";
     public string Artist { get; set; } = "";
     public string Album { get; set; } = "";
+    public string AlbumArtist { get; set; } = "";
+    public string Edition { get; set; } = "";
+    public string? CuePath { get; set; }
+    public double StartOffset { get; set; }
+    public double? EndOffset { get; set; }
+    [JsonIgnore] public string AlbumKey => string.Join("\0", Album.Trim(), string.IsNullOrWhiteSpace(AlbumArtist) ? Artist.Trim() : AlbumArtist.Trim(), Year, Edition.Trim());
+    [JsonIgnore] public string[] ArtistNames => Artist.Split(new[] { " / ", ";", "；", "、" }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    [JsonIgnore] public string DurationText => TimeSpan.FromSeconds(Math.Max(0, Duration)).ToString(Duration >= 3600 ? @"h\:mm\:ss" : @"m\:ss");
     public string AlbumId { get; set; } = "";
     public string? CoverArt { get; set; }
     public string? Suffix { get; set; }
@@ -34,7 +42,8 @@ public sealed class Track : System.ComponentModel.INotifyPropertyChanged
     public bool Preview { get; set; }
     [JsonIgnore] public bool IsNetease => Id.StartsWith("ncm:", StringComparison.Ordinal);
     public string Fingerprint { get; set; } = "";
-    [JsonIgnore] public string Subtitle => string.Join(" · ", new[] { Artist, Album }.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct());
+    [JsonIgnore] public string SourceLabel => IsLocal ? "本地" : IsNetease ? "网易云" : "Navidrome";
+    [JsonIgnore] public string Subtitle => string.Join(" · ", new[] { Artist, Album, SourceLabel }.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct());
     [JsonIgnore] public string Format => string.IsNullOrEmpty(Suffix) ? "未知格式" : Suffix.ToUpperInvariant();
     public static Track Parse(JsonElement e) => JsonSerializer.Deserialize<Track>(e, Store.JsonOptions)!;
 }
@@ -86,7 +95,33 @@ public sealed class AppSettings
     public int OfflineCacheMb { get; set; } = 2048;
     public List<string> MusicFolders { get; set; } = [];
     public string AlbumSort { get; set; } = "newest";
+    public string LocalView { get; set; } = "歌曲";
+    public string LastSection { get; set; } = "最近添加";
+    public bool DetailedTracks { get; set; } = true;
+    public bool CompactTracks { get; set; }
+    public bool QueueVisible { get; set; } = true;
+    public double QueueWidth { get; set; } = 254;
+    public double MainWidth { get; set; } = 1120;
+    public double MainHeight { get; set; } = 700;
+    public List<TrackColumnPreference> TrackColumns { get; set; } = [];
+    public string SearchScope { get; set; } = "当前来源";
+    public bool DeviceDisconnectPause { get; set; }
+    public bool EqualizerEnabled { get; set; }
+    public double[] Equalizer { get; set; } = new double[10];
+    public Dictionary<string, AudioProfile> AudioProfiles { get; set; } = [];
+    public double LyricFontSize { get; set; } = 23;
+    public double LyricSpacing { get; set; } = 9;
+    public double LyricBackgroundOpacity { get; set; } = 1;
+    public string DesktopLyricColor { get; set; } = "";
+    public int NextKey { get; set; }
+    public int PreviousKey { get; set; }
+    public int VolumeUpKey { get; set; }
+    public int VolumeDownKey { get; set; }
+    public string FileOpenAction { get; set; } = "play";
 }
+public sealed class TrackColumnPreference { public string Name { get; set; } = ""; public double Width { get; set; } = 120; public bool Visible { get; set; } = true; public int Order { get; set; } }
+public sealed class AudioProfile { public bool Exclusive { get; set; } public string ReplayGain { get; set; } = "no"; public double Preamp { get; set; } public bool EqualizerEnabled { get; set; } public double[] Equalizer { get; set; } = new double[10]; }
+public sealed class ListeningEntry { public Track Track { get; set; } = new(); public DateTime PlayedUtc { get; set; } public string Scope { get; set; } = ""; public string ContextId { get; set; } = ""; [JsonIgnore] public List<Track> Context { get; set; } = []; [JsonIgnore] public string Label => $"{PlayedUtc.ToLocalTime():yyyy-MM-dd HH:mm} · {Track.Title} · {Track.Artist} · {Track.SourceLabel}"; }
 public sealed class QueueState
 {
     public List<Track> Tracks { get; set; } = [];
@@ -104,6 +139,8 @@ public sealed class SavedPlaylist
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "新歌单";
     public List<Track> Tracks { get; set; } = [];
+    public string Description { get; set; } = "";
+    public string? CoverPath { get; set; }
 }
 public sealed class OfflineEntry
 {
@@ -112,4 +149,5 @@ public sealed class OfflineEntry
     public string FileName { get; set; } = "";
     public long Size { get; set; }
     public DateTime LastUsedUtc { get; set; } = DateTime.UtcNow;
+    public bool Pinned { get; set; }
 }

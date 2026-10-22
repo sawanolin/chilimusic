@@ -38,11 +38,12 @@ public class NavidromeApiClient : IDisposable
         pairs.AddRange(args);
         return ValidateServer(_settings.Server) + "/rest/" + endpoint + ".view?" + string.Join("&", pairs.Select(p => $"{Uri.EscapeDataString(p.Item1)}={Uri.EscapeDataString(p.Item2)}"));
     }
-    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct, bool allowRangeFailure = false)
     {
         try
         {
             var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (allowRangeFailure && response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable) return response;
             if (!response.IsSuccessStatusCode) { var code = (int)response.StatusCode; response.Dispose(); throw new ApiException(code is 401 or 403 ? "认证失败或没有访问权限。" : code is >= 300 and < 400 ? "服务器重定向了请求，请填写最终服务地址。" : $"服务器返回 HTTP {code}。"); }
             return response;
         }
@@ -106,15 +107,20 @@ public class NavidromeApiClient : IDisposable
     public virtual async Task DownloadAsync(string id, string destination, long maxBytes, IProgress<(long Bytes, long? Total)>? progress, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, Url("download", ("id", id)));
+        long existing = File.Exists(destination) ? new FileInfo(destination).Length : 0;
+        if (existing > 0) request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(existing, null);
         using var stalled = CancellationTokenSource.CreateLinkedTokenSource(ct); stalled.CancelAfter(TimeSpan.FromSeconds(30));
-        using var response = await SendAsync(request, stalled.Token);
+        using var response = await SendAsync(request, stalled.Token, true);
+        if (response.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable) { if (existing <= 0) throw new ApiException("服务器未接受下载范围。"); File.Delete(destination); await DownloadAsync(id, destination, maxBytes, progress, ct); return; }
         string type = response.Content.Headers.ContentType?.MediaType?.ToLowerInvariant() ?? "";
         if (type.StartsWith("text/") || type.EndsWith("json") || type.EndsWith("xml")) throw new ApiException("服务器未允许下载这首歌曲。");
-        long? total = response.Content.Headers.ContentLength;
+        bool append = existing > 0 && response.StatusCode == HttpStatusCode.PartialContent && response.Content.Headers.ContentRange?.From == existing;
+        if (!append) existing = 0;
+        long? total = response.Content.Headers.ContentRange?.Length ?? (response.Content.Headers.ContentLength is long length ? length + existing : null);
         if (total > maxBytes) throw new ApiException("这首歌曲超过离线缓存容量。");
         await using var input = await response.Content.ReadAsStreamAsync(ct);
-        await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true);
-        byte[] buffer = new byte[65536]; long written = 0; int read;
+        await using var output = new FileStream(destination, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 65536, true);
+        byte[] buffer = new byte[65536]; long written = existing; int read;
         while ((read = await input.ReadAsync(buffer, stalled.Token)) > 0)
         {
             stalled.CancelAfter(TimeSpan.FromSeconds(30));

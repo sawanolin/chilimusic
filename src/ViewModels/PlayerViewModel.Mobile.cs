@@ -36,7 +36,7 @@ public sealed partial class PlayerViewModel
     public void UpdateMobilePosition(double position)
     {
         if (!MobileOutput || !double.IsFinite(position)) return;
-        if (!_mobileHistoryStarted && MobilePlaying && position > .1 && Current is { IsLocal: false } current) { _mobileHistoryStarted = true; if (current.IsNetease) Api.Netease.RecordRecent(current); Run(() => ScrobbleQuietlyAsync(current.Id, false)); }
+        if (!_mobileHistoryStarted && MobilePlaying && position > .1 && Current is { } current) { _mobileHistoryStarted = true; RecordListening(); if (current.IsNetease) Api.Netease.RecordRecent(current); if (!current.IsLocal) Run(() => ScrobbleQuietlyAsync(current.Id, false)); }
         Position = Math.Clamp(position, 0, Duration); UpdateLyricPosition(); SaveQueue();
     }
     private bool _mobileHistoryStarted;

@@ -9,8 +9,11 @@ public sealed partial class PlayerViewModel
     public event Action? SettingsChanged;
     private LibraryItem? _browseItem;
     private string _browseQuery = "";
-    private (string Section, LibraryItem? Item, string Format, string Artist, string Album, string Category)? _beforeSearch;
-    private readonly Stack<(string Section, string Query, LibraryItem? Item, string Format, string Artist, string Album, string Category)> _browseHistory = new();
+    private BrowseState? _beforeSearch;
+    private readonly Stack<BrowseState> _browseHistory = new();
+    internal event Action? BrowseLeaving;
+    internal event Action<BrowseViewport>? BrowseArrived;
+    internal BrowseViewport BrowseViewport { get; set; } = new();
     public bool CanGoBack => _browseHistory.Count > 0;
     public string BrowseQuery => _browseQuery;
     public bool CanSortAlbums => _browseItem == null && Section is "最近添加" or "专辑";
@@ -37,19 +40,67 @@ public sealed partial class PlayerViewModel
     public string DownloadStatus { get => _downloadStatus; set { _downloadStatus = value; Changed(); } }
     public async Task BrowseAsync(string section, string query = "", LibraryItem? item = null, bool remember = true)
     {
+        var current = CaptureBrowseState();
         if (remember && (section != Section || item?.Id != _browseItem?.Id || section != "搜索" && query != _browseQuery))
         {
-            _browseHistory.Push((Section, _browseQuery, _browseItem, FormatFilter, ArtistFilter, AlbumFilter, SearchCategory));
+            _browseHistory.Push(current);
+            if (_browseHistory.Count > 32)
+            {
+                var recent = _browseHistory.Take(32).Reverse().ToArray();
+                _browseHistory.Clear(); foreach (var state in recent) _browseHistory.Push(state);
+            }
             Changed(nameof(CanGoBack));
         }
-        if (remember && section == "搜索" && Section != "搜索") _beforeSearch = (Section, _browseItem, FormatFilter, ArtistFilter, AlbumFilter, SearchCategory);
+        if (section == "搜索") RememberSearch(query);
+        if (remember && section == "搜索" && Section != "搜索") _beforeSearch = current;
+        foreach (var album in Library) album.Cover = null;
         _browseCts.Cancel(); _browseCts.Dispose(); _browseCts = new(); int generation = ++_browseGeneration;
         _browseItem = item; _browseQuery = query; _songOffset = _albumOffset = _artistOffset = 0;
-        if (item == null && section != "搜索") Navigation = section;
+        if (item == null && section != "搜索") { Navigation = section; Settings.LastSection = section; SaveSettings(); }
         if (section != "搜索") { _searchCategory = "全部"; _formatFilter = "全部格式"; _artistFilter = _albumFilter = ""; Changed(nameof(SearchCategory)); Changed(nameof(FormatFilter)); Changed(nameof(ArtistFilter)); Changed(nameof(AlbumFilter)); }
         Section = section; Changed(nameof(BrowseQuery)); Changed(nameof(CanSortAlbums)); Changed(nameof(IsSearch)); Results.Clear(); Library.Clear(); HasMore = false; IsBrowsing = true; Status = "正在加载…";
         try { await FetchPageAsync(false, generation, _browseCts.Token); }
-        finally { if (generation == _browseGeneration) IsBrowsing = false; }
+        finally { if (generation == _browseGeneration) { IsBrowsing = false; BrowseArrived?.Invoke(new()); Run(CompleteFilterAsync); } }
+    }
+    private BrowseState CaptureBrowseState()
+    {
+        BrowseLeaving?.Invoke();
+        return new(Section, _browseQuery, _browseItem, Navigation, FormatFilter, ArtistFilter,
+            AlbumFilter, SearchCategory, AlbumSort, Results.ToArray(), Library.ToArray(),
+            _songOffset, _albumOffset, _artistOffset, HasMore,
+            IsBrowsing && Results.Count == 0 && Library.Count == 0, BrowseViewport);
+    }
+    public async Task NavigateSectionAsync(string section)
+    {
+        if (_browseItem == null && Section == section) return;
+        var previous = _browseHistory.FirstOrDefault(s => s.Section == section && s.Item == null && s.Sort == AlbumSort);
+        if (previous == null) { await BrowseAsync(section); return; }
+        while (_browseHistory.TryPop(out var state)) if (ReferenceEquals(state, previous)) break;
+        Changed(nameof(CanGoBack)); await RestoreBrowseAsync(previous);
+    }
+    private async Task RestoreBrowseAsync(BrowseState state)
+    {
+        if (state.WasLoading || state.Sort != AlbumSort)
+        {
+            await BrowseAsync(state.Section, state.Query, state.Item, remember: false);
+            RestoreFilters(state.Format, state.Artist, state.Album, state.Category);
+            BrowseArrived?.Invoke(state.Viewport); return;
+        }
+        BrowseLeaving?.Invoke();
+        _browseCts.Cancel(); _browseCts.Dispose(); _browseCts = new(); ++_browseGeneration;
+        foreach (var album in Library) album.Cover = null;
+        _browseItem = state.Item; _browseQuery = state.Query;
+        _songOffset = state.SongOffset; _albumOffset = state.AlbumOffset; _artistOffset = state.ArtistOffset;
+        if (state.Section != "搜索") _beforeSearch = null;
+        Navigation = state.Navigation; Section = state.Section;
+        Results.Clear(); Library.Clear();
+        foreach (var song in state.Songs) Results.Add(song);
+        foreach (var album in state.Albums) Library.Add(album);
+        HasMore = state.HasMore; IsBrowsing = false;
+        RestoreFilters(state.Format, state.Artist, state.Album, state.Category);
+        Changed(nameof(BrowseQuery)); Changed(nameof(CanSortAlbums)); Changed(nameof(IsSearch));
+        Status = $"{Section} · {Results.Count} 首歌曲，{Library.Count} 个项目";
+        BrowseArrived?.Invoke(state.Viewport);
     }
     public async Task LoadMoreAsync()
     {
@@ -60,7 +111,9 @@ public sealed partial class PlayerViewModel
     private async Task FetchPageAsync(bool append, int generation, CancellationToken ct)
     {
         List<Track> tracks = []; List<LibraryItem> items = []; bool more = false;
-        if (_browseItem?.Kind is "local-album" or "local-artist")
+        if (FetchLocalPage(tracks, items, out more)) { }
+        else if (Section == "搜索" && (SearchScope != "当前来源" || IsLocalCatalog)) more = await FetchScopedSearchAsync(tracks, items, ct);
+        else if (_browseItem?.Kind is "local-album" or "local-artist")
         {
             var all = _localTracks.Where(t => _browseItem.Kind == "local-album" ? t.Album == _browseItem.Title : t.Artist == _browseItem.Title).OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber).ThenBy(t => t.Title).ToList(); tracks.AddRange(_browseItem.Kind == "local-album" ? all : all.Skip(_songOffset).Take(PageSize)); _songOffset += tracks.Count; more = _songOffset < all.Count;
         }
@@ -70,7 +123,7 @@ public sealed partial class PlayerViewModel
             tracks.AddRange(source.Skip(_songOffset).Take(PageSize)); _songOffset += tracks.Count; more = _songOffset < source.Count;
             if (Section == "搜索")
             {
-                var albums = _localTracks.Where(t => Contains(t.Album, _browseQuery)).GroupBy(t => t.Album).Select(g => new LibraryItem("local-album:" + g.Key, g.Key, string.Join(" / ", g.Select(t => t.Artist).Distinct()), "local-album") { LocalCoverPath = g.FirstOrDefault(t => t.EmbeddedCoverPath != null)?.EmbeddedCoverPath }).ToList();
+                var albums = _localTracks.Where(t => Contains(t.Album, _browseQuery)).GroupBy(t => LocalAlbumId(t)).Select(g => new LibraryItem(g.Key, g.First().Album, string.Join(" / ", g.Select(t => t.Artist).Distinct()), "local-album") { LocalCoverPath = g.FirstOrDefault(t => t.EmbeddedCoverPath != null)?.EmbeddedCoverPath }).ToList();
                 var artists = _localTracks.Where(t => Contains(t.Artist, _browseQuery)).GroupBy(t => t.Artist).Select(g => new LibraryItem("local-artist:" + g.Key, g.Key, $"{g.Count()} 首歌曲", "local-artist")).ToList();
                 items.AddRange(albums.Skip(_albumOffset).Take(30)); items.AddRange(artists.Skip(_artistOffset).Take(30)); _albumOffset += Math.Min(30, Math.Max(0, albums.Count - _albumOffset)); _artistOffset += Math.Min(30, Math.Max(0, artists.Count - _artistOffset)); more |= _albumOffset < albums.Count || _artistOffset < artists.Count;
             }
@@ -81,7 +134,7 @@ public sealed partial class PlayerViewModel
         }
         else if (Section == "歌单" && _browseItem == null)
         {
-            items.AddRange(Playlists.Local.Select(p => new LibraryItem(p.Id, p.Name, $"{p.Tracks.Count} 首歌曲 · 本地歌单", "local-playlist")));
+            items.AddRange(Playlists.Local.Select(p => new LibraryItem(p.Id, p.Name, $"{p.Tracks.Count} 首歌曲 · 本地歌单", "local-playlist") { LocalCoverPath = p.CoverPath }));
             if (Api.Configured) { var root = await Api.CallAsync("getPlaylists", ct); if (root.TryGetProperty("playlists", out var lists)) Rows(lists, "playlist", "playlist", items); }
         }
         else if (_browseItem?.Kind == "local-playlist") tracks.AddRange(Playlists.Local.FirstOrDefault(p => p.Id == _browseItem.Id)?.Tracks ?? []);
@@ -120,12 +173,12 @@ public sealed partial class PlayerViewModel
     {
         if (parent.TryGetProperty(key, out var rows)) foreach (var row in rows.EnumerateArray()) items.Add(new(NavidromeApiClient.Text(row, "id"), NavidromeApiClient.Text(row, "name"), NavidromeApiClient.Text(row, "artist", kind == "playlist" ? "歌单" : kind == "artist" ? "歌手" : "专辑"), kind, NavidromeApiClient.Text(row, "coverArt")));
     }
-    private static bool Contains(string text, string value) => text.Contains(value, StringComparison.CurrentCultureIgnoreCase);
+    private static bool Contains(string text, string value) => SearchText.Matches(text, value);
     public void ApplyResultFilter()
     {
         CollectionViewSource.GetDefaultView(Results).Filter = row => row is Track t && ShowSongs && (FormatFilter == "全部格式" || t.Format.Equals(FormatFilter, StringComparison.OrdinalIgnoreCase)) && Contains(t.Artist, ArtistFilter) && Contains(t.Album, AlbumFilter);
         CollectionViewSource.GetDefaultView(Library).Filter = row => row is LibraryItem item && (SearchCategory == "全部" || Section != "搜索" || SearchCategory == "专辑" && item.Kind.EndsWith("album") || SearchCategory == "歌手" && item.Kind.EndsWith("artist")) && Contains(item.Subtitle, ArtistFilter) && Contains(item.Title, AlbumFilter);
-        Changed(nameof(ShowSongs)); Changed(nameof(ShowAlbums));
+        Changed(nameof(ShowSongs)); Changed(nameof(ShowAlbums)); Changed(nameof(BrowseSummary)); Changed(nameof(AlbumDetail)); Run(CompleteFilterAsync);
     }
     public async Task LoadVisibleCoversAsync(int first, int count)
     {
@@ -142,10 +195,13 @@ public sealed partial class PlayerViewModel
     public async Task ClearSearchAsync()
     {
         if (Section != "搜索") return; var previous = _beforeSearch; _beforeSearch = null;
-        if (previous is { } old && _browseHistory.TryPeek(out var last) && last.Section == old.Section && last.Item?.Id == old.Item?.Id) { _browseHistory.Pop(); Changed(nameof(CanGoBack)); }
-        if (previous is { } snapshot) { _formatFilter = snapshot.Format; _artistFilter = snapshot.Artist; _albumFilter = snapshot.Album; _searchCategory = snapshot.Category; Changed(nameof(FormatFilter)); Changed(nameof(ArtistFilter)); Changed(nameof(AlbumFilter)); Changed(nameof(SearchCategory)); }
-        await BrowseAsync(previous?.Section ?? Navigation, item: previous?.Item, remember: false);
-        if (previous is { } restored) RestoreFilters(restored.Format, restored.Artist, restored.Album, restored.Category);
+        if (previous != null)
+        {
+            if (_browseHistory.Contains(previous))
+                while (_browseHistory.TryPop(out var state)) if (ReferenceEquals(state, previous)) break;
+            Changed(nameof(CanGoBack)); await RestoreBrowseAsync(previous);
+        }
+        else await BrowseAsync(Navigation, remember: false);
     }
     private void RestoreFilters(string format, string artist, string album, string category)
     {
@@ -155,14 +211,13 @@ public sealed partial class PlayerViewModel
     public async Task GoBackAsync()
     {
         if (!_browseHistory.TryPop(out var previous)) return;
-        Changed(nameof(CanGoBack)); await BrowseAsync(previous.Section, previous.Query, previous.Item, remember: false);
-        RestoreFilters(previous.Format, previous.Artist, previous.Album, previous.Category);
+        Changed(nameof(CanGoBack)); await RestoreBrowseAsync(previous);
     }
-    public Task PlayBrowseTrackAsync(Track track) => PlayFromListAsync(track, CollectionViewSource.GetDefaultView(Results).Cast<Track>().ToArray());
+    public Task PlayBrowseTrackAsync(Track track) => PlayCompleteBrowseAsync(track);
     public async Task PlayLibraryAsync(LibraryItem item, bool enqueue = false)
     {
         List<Track> tracks;
-        if (item.Kind is "local-album" or "local-artist") tracks = _localTracks.Where(t => item.Kind == "local-album" ? t.Album == item.Title : t.Artist == item.Title).OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber).ThenBy(t => t.Title).ToList();
+        if (item.Kind.StartsWith("local-") && item.Kind != "local-playlist") tracks = LocalItemTracks(item).OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber).ThenBy(t => t.Title).ToList();
         else if (item.Kind == "local-playlist") tracks = Playlists.Local.FirstOrDefault(p => p.Id == item.Id)?.Tracks.ToList() ?? [];
         else if (item.Kind is "album" or "playlist") { var root = await Api.CallAsync(item.Kind == "album" ? "getAlbum" : "getPlaylist", default, ("id", item.Id)); tracks = NavidromeApiClient.Tracks(root, item.Kind == "album" ? "album" : "playlist", item.Kind == "album" ? "song" : "entry"); if (item.Kind == "album") tracks = tracks.OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber).ToList(); }
         else { await BrowseAsync(item.Title, item: item); return; }
@@ -177,9 +232,29 @@ public sealed partial class PlayerViewModel
             if (_disposed) return;
             _localTracks.Clear(); _localTracks.AddRange(tracks);
             foreach (var old in Queue.Where(t => t.IsLocal).ToArray()) { var fresh = _localTracks.FirstOrDefault(t => t.Id == old.Id); if (fresh != null) { old.LocalPath = fresh.LocalPath; old.Missing = fresh.Missing; old.Title = fresh.Title; old.Artist = fresh.Artist; old.Album = fresh.Album; old.EmbeddedCoverPath = fresh.EmbeddedCoverPath; old.EmbeddedLyrics = fresh.EmbeddedLyrics; old.NotifyMetadata(); } }
-            if (Navigation == "本地音乐" && Section != "搜索") Run(() => BrowseAsync("本地音乐"));
+            if (Navigation == "本地音乐" || IsLocalCatalog || _browseItem?.Kind.StartsWith("local-", StringComparison.Ordinal) == true) Run(RefreshLocalBrowseAsync);
         }
         if (_dispatcher.CheckAccess()) Apply(); else _dispatcher.BeginInvoke(Apply);
+    }
+    private async Task RefreshLocalBrowseAsync()
+    {
+        var state = CaptureBrowseState(); var item = state.Item;
+        if (item?.Kind == "local-album" && !LocalItemTracks(item).Any())
+        {
+            var fresh = _localTracks.FirstOrDefault(t => state.Songs.Any(s => s.Id == t.Id));
+            if (fresh != null) item = new(LocalAlbumId(fresh), fresh.Album, fresh.AlbumArtist.Length > 0 ? fresh.AlbumArtist : fresh.Artist, "local-album") { LocalCoverPath = fresh.EmbeddedCoverPath };
+        }
+        int generation = _browseGeneration + 1;
+        await BrowseAsync(item?.Title ?? state.Section, state.Query, item, remember: false);
+        if (generation != _browseGeneration) return;
+        RestoreFilters(state.Format, state.Artist, state.Album, state.Category);
+        while (HasMore && Results.Count + Library.Count < state.Songs.Length + state.Albums.Length)
+        {
+            int count = Results.Count + Library.Count; await LoadMoreAsync();
+            if (generation != _browseGeneration || count == Results.Count + Library.Count) break;
+        }
+        if (generation != _browseGeneration) return;
+        BrowseArrived?.Invoke(state.Viewport with { SelectedSongs = (state.Viewport.SelectedSongs ?? []).Select(s => Results.FirstOrDefault(t => t.Id == s.Id)).OfType<Track>().ToArray(), SelectedAlbum = Library.FirstOrDefault(a => a.Id == state.Viewport.SelectedAlbum?.Id) });
     }
     public async Task AddFolderAsync(string path) { await LocalLibrary.AddFolderAsync(path); await BrowseAsync("本地音乐"); }
     public async Task DownloadSelectionAsync(IEnumerable<Track> tracks) => await Offline.DownloadAsync(tracks);
@@ -191,7 +266,7 @@ public sealed partial class PlayerViewModel
     {
         var selected = tracks.ToList();
         if (server) { if (selected.Any(t => t.IsLocal || t.IsNetease != id.StartsWith("ncm:", StringComparison.Ordinal))) throw new ApiException("歌单只能添加相同音乐来源的歌曲。"); await Api.UpdatePlaylistAsync(id, add: selected.Select(t => t.Id)); }
-        else { var playlist = Playlists.Local.First(p => p.Id == id); playlist.Tracks.AddRange(selected); Playlists.Save(); }
-        Status = "已添加到歌单";
+        else { var playlist = Playlists.Local.First(p => p.Id == id); int before = playlist.Tracks.Count; var known = playlist.Tracks.Select(t => t.Id).ToHashSet(); playlist.Tracks.AddRange(selected.Where(t => known.Add(t.Id))); Playlists.Save(); Status = $"已添加 {playlist.Tracks.Count - before} 首，重复歌曲已跳过"; NotifyPlaylists(); return; }
+        NotifyPlaylists(); Status = "已添加到歌单";
     }
 }

@@ -8,7 +8,8 @@ public partial class SettingsWindow : Window
     public SettingsWindow(PlayerViewModel vm)
     {
         InitializeComponent(); WindowAppearance.Attach(this); _vm = vm;
-        _options = new(vm); AudioOptions.Content = _options.Page("音频输出"); TaskbarOptions.Content = _options.Page("任务栏"); HotkeyOptions.Content = _options.Page("快捷键"); FolderOptions.Content = _options.Page("本地音乐目录"); CacheOptions.Content = _options.Page("离线缓存"); AppearanceOptions.Content = _options.AccentOption;
+        _options = new(vm);
+        foreach (var page in new[] { "快捷键" }) if (_options.Page(page) is System.Windows.Controls.Border card && card.Child is System.Windows.Controls.StackPanel panel) panel.Children.Add(UiFactory.Button("更多快捷键与文件打开设置…", () => new ProductOptionsWindow(vm) { Owner = this }.ShowDialog())); AudioOptions.Content = _options.Page("音频输出"); TaskbarOptions.Content = _options.Page("任务栏"); HotkeyOptions.Content = _options.Page("快捷键"); FolderOptions.Content = _options.Page("本地音乐目录"); CacheOptions.Content = _options.Page("离线缓存"); AppearanceOptions.Content = _options.AccentOption;
         ThemeBox.ItemsSource = ThemeCatalog.Choices; ThemeBox.DisplayMemberPath = "Name"; ThemeBox.SelectedValuePath = "Id"; ThemeBox.SelectedValue = ThemeCatalog.Normalize(vm.Settings.Theme);
         var remotePage = new System.Windows.Controls.StackPanel(); remotePage.SetResourceReference(System.Windows.Controls.Control.ForegroundProperty, "TextBrush"); remotePage.Children.Add(UiFactory.Card("手机遥控", UiFactory.Text("手机与电脑连接同一局域网，扫码后输入配对码。默认由电脑播放，也可切换到手机。", 11), UiFactory.Button("打开手机遥控", () => ((App)Application.Current).ShowRemote(), true)));
         SettingsTabs.Items.Add(new System.Windows.Controls.TabItem { Header = "手机遥控", Content = new System.Windows.Controls.ScrollViewer { Content = remotePage, Padding = new Thickness(20), VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto } });

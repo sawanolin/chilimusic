@@ -82,7 +82,20 @@ public sealed class MpvPlayerService : IAudioPlayer
         finally { Marshal.FreeHGlobal(array); foreach (var p in strings) Marshal.FreeCoTaskMem(p); }
     }
     public void Load(string url, double start = 0) { Command("loadfile", url, "replace", "-1", "start=" + start.ToString(System.Globalization.CultureInfo.InvariantCulture)); Set("pause", "no"); }
+    public void LoadSegment(string url, double offset, double? end, double position = 0)
+    {
+        var options = "start=" + (offset + position).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (end.HasValue) options += ",end=" + end.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Command("loadfile", url, "replace", "-1", options); Set("pause", "no");
+    }
     public void PrepareNext(string? url) { Command("playlist-clear"); if (url != null) Command("loadfile", url, "append", "-1", "start=0"); }
+    public void PrepareNextSegment(string? url, double start, double? end)
+    {
+        Command("playlist-clear"); if (url == null) return;
+        string options = "start=" + start.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (end.HasValue) options += ",end=" + end.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Command("loadfile", url, "append", "-1", options);
+    }
     public IReadOnlyList<AudioDevice> AudioDevices()
     {
         var devices = new List<AudioDevice> { new("auto", "系统默认输出") };

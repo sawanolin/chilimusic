@@ -16,4 +16,4 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md'),(Join-Path $projectR
 Copy-Item -LiteralPath (Join-Path $projectRoot 'licenses') -Destination $OutputDirectory -Recurse -Force
 $imageDirectory = Join-Path $OutputDirectory 'docs\images'
 New-Item -ItemType Directory -Path $imageDirectory -Force | Out-Null
-Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\images\main-product.png'),(Join-Path $projectRoot 'docs\images\taskbar-playing.png') -Destination $imageDirectory -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\images\main-product.png'),(Join-Path $projectRoot 'docs\images\immersive-player.png'),(Join-Path $projectRoot 'docs\images\taskbar-playing.png') -Destination $imageDirectory -Force

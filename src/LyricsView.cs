@@ -16,13 +16,15 @@ internal sealed class LyricsView : Grid
     private DateTime _manualUntil;
     private ScrollViewer? _scroll;
     private bool _centerPending;
+    private readonly bool _immersive;
+    private int _depthActive = int.MinValue, _depthCount = -1;
     private readonly DispatcherTimer _resume = new() { Interval = TimeSpan.FromSeconds(5) };
     private static readonly DependencyProperty ScrollOffsetProperty = DependencyProperty.Register("ScrollOffset", typeof(double), typeof(LyricsView), new PropertyMetadata(0d, (owner, args) => ((LyricsView)owner)._scroll?.ScrollToVerticalOffset((double)args.NewValue)));
     public static readonly DependencyProperty ContentPaddingProperty = DependencyProperty.Register(nameof(ContentPadding), typeof(Thickness), typeof(LyricsView), new PropertyMetadata(new Thickness(0)));
     public Thickness ContentPadding { get => (Thickness)GetValue(ContentPaddingProperty); private set => SetValue(ContentPaddingProperty, value); }
     public LyricsView(PlayerViewModel vm, bool immersive = false)
     {
-        _vm = vm; DataContext = vm;
+        _vm = vm; _immersive = immersive; DataContext = vm;
         _list.ItemsSource = vm.LyricLines; _list.ItemTemplate = Template(immersive);
         var row = new FrameworkElementFactory(typeof(Border)); row.SetValue(Border.PaddingProperty, new TemplateBindingExtension(Control.PaddingProperty)); row.AppendChild(new FrameworkElementFactory(typeof(ContentPresenter)));
         var rowStyle = new Style(typeof(ListBoxItem)); rowStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch)); rowStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(12, immersive ? 15 : 8, 12, immersive ? 15 : 8))); rowStyle.Setters.Add(new Setter(Control.TemplateProperty, new ControlTemplate(typeof(ListBoxItem)) { VisualTree = row })); _list.ItemContainerStyle = rowStyle;
@@ -32,6 +34,7 @@ internal sealed class LyricsView : Grid
         Children.Add(UiFactory.ListWithEmptyState(_list, "暂无歌词", "可匹配网易云歌词，或导入 LRC 文件。"));
         _list.PreviewMouseWheel += (_, _) => PauseFollowing();
         _list.PreviewMouseDown += (_, _) => PauseFollowing();
+        _list.LayoutUpdated += (_, _) => UpdateLineDepth();
         _resume.Tick += (_, _) => { _resume.Stop(); _manualUntil = DateTime.MinValue; Center(); };
         _list.MouseDoubleClick += (_, _) => { if (_list.SelectedItem is LyricLine { Time: double time }) { vm.Seek(Math.Max(0, time - vm.LyricOffset)); _manualUntil = DateTime.MinValue; Center(); } };
         SizeChanged += (_, _) => { ContentPadding = new Thickness(0, Math.Max(30, ActualHeight / 2 - 40), 0, Math.Max(30, ActualHeight / 2 - 40)); Center(); };
@@ -40,7 +43,26 @@ internal sealed class LyricsView : Grid
     }
     private void StopAnimation() { double current = _scroll?.VerticalOffset ?? 0; BeginAnimation(ScrollOffsetProperty, null); SetCurrentValue(ScrollOffsetProperty, current); }
     private void PauseFollowing() { StopAnimation(); _manualUntil = DateTime.UtcNow.AddSeconds(5); _resume.Stop(); _resume.Start(); }
-    private void OnActive(LyricLine? line) { if (DateTime.UtcNow >= _manualUntil) Center(); }
+    private void OnActive(LyricLine? line) { _depthActive = int.MinValue; UpdateLineDepth(); if (DateTime.UtcNow >= _manualUntil) Center(); }
+    private void UpdateLineDepth()
+    {
+        if (!_immersive || !IsVisible) return;
+        if (_depthActive != int.MinValue && _depthCount == _list.Items.Count) return;
+        if (_list.Items.Count > 0 && _list.ItemContainerGenerator.ContainerFromIndex(0) == null) return;
+        int active = _vm.LyricLines.ToList().FindIndex(line => line.IsActive);
+        _depthActive = active; _depthCount = _list.Items.Count;
+        foreach (var row in _list.Items.Cast<LyricLine>().Select((line, index) => (line, index)))
+        {
+            if (_list.ItemContainerGenerator.ContainerFromIndex(row.index) is not ListBoxItem item) continue;
+            int distance = active < 0 ? 1 : Math.Abs(row.index - active);
+            double opacity = distance == 0 ? 1 : distance == 1 ? .48 : distance == 2 ? .30 : .18;
+            // Animate only when the active line changes; layout ticks never restart an animation.
+            if (item.Tag is double previous && previous == opacity) continue;
+            item.Tag = opacity;
+            if (SystemParameters.ClientAreaAnimation) item.BeginAnimation(OpacityProperty, new DoubleAnimation(opacity, TimeSpan.FromMilliseconds(280)));
+            else { item.BeginAnimation(OpacityProperty, null); item.Opacity = opacity; }
+        }
+    }
     private void OnChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName is nameof(_vm.LyricDocuments) or nameof(_vm.ShowLyricTranslation)) { _manualUntil = DateTime.MinValue; Dispatcher.BeginInvoke(Center, DispatcherPriority.Loaded); } }
     internal void Center()
     {
@@ -67,10 +89,16 @@ internal sealed class LyricsView : Grid
     private static DataTemplate Template(bool immersive)
     {
         var stack = new FrameworkElementFactory(typeof(StackPanel)); stack.SetResourceReference(FrameworkElement.MarginProperty, "LyricMargin");
-        var text = new FrameworkElementFactory(typeof(TextBlock), "Words"); text.SetBinding(TextBlock.TextProperty, new Binding("Text")); text.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Center); text.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap); text.SetResourceReference(TextBlock.FontSizeProperty, "LyricFontSize"); text.SetValue(UIElement.OpacityProperty, .55); text.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush"); stack.AppendChild(text);
-        var translation = new FrameworkElementFactory(typeof(TextBlock), "Translation"); translation.SetBinding(TextBlock.TextProperty, new Binding("Translation")); translation.SetValue(TextBlock.TextAlignmentProperty, TextAlignment.Center); translation.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap); translation.SetValue(TextBlock.FontSizeProperty, 13d); translation.SetValue(FrameworkElement.MarginProperty, new Thickness(0, 5, 0, 0)); translation.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); stack.AppendChild(translation);
+        var text = new FrameworkElementFactory(typeof(TextBlock), "Words"); text.SetBinding(TextBlock.TextProperty, new Binding("Text")); text.SetValue(TextBlock.TextAlignmentProperty, immersive ? TextAlignment.Left : TextAlignment.Center); text.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap); text.SetResourceReference(TextBlock.FontSizeProperty, "LyricFontSize"); text.SetValue(TextBlock.FontWeightProperty, immersive ? FontWeights.SemiBold : FontWeights.Normal); text.SetValue(UIElement.OpacityProperty, immersive ? 1d : .55); text.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush"); stack.AppendChild(text);
+        var translation = new FrameworkElementFactory(typeof(TextBlock), "Translation"); translation.SetBinding(TextBlock.TextProperty, new Binding("Translation")); translation.SetValue(TextBlock.TextAlignmentProperty, immersive ? TextAlignment.Left : TextAlignment.Center); translation.SetValue(TextBlock.TextWrappingProperty, TextWrapping.Wrap); translation.SetValue(TextBlock.FontSizeProperty, immersive ? 15d : 13d); translation.SetValue(FrameworkElement.MarginProperty, new Thickness(0, immersive ? 10 : 5, 0, 0)); translation.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); stack.AppendChild(translation);
         var template = new DataTemplate { VisualTree = stack };
         var active = new DataTrigger { Binding = new Binding("IsActive"), Value = true }; active.Setters.Add(new Setter(UIElement.OpacityProperty, 1d, "Words")); active.Setters.Add(new Setter(TextBlock.FontWeightProperty, FontWeights.SemiBold, "Words")); active.Setters.Add(new Setter(TextBlock.ForegroundProperty, new DynamicResourceExtension("TextBrush"), "Translation")); template.Triggers.Add(active);
+        if (immersive)
+        {
+            text.SetValue(UIElement.EffectProperty, new System.Windows.Media.Effects.BlurEffect { Radius = .7, RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance });
+            active.Setters.Add(new Setter(UIElement.EffectProperty, null, "Words"));
+            active.Setters.Add(new Setter(TextBlock.FontWeightProperty, FontWeights.Bold, "Words"));
+        }
         var empty = new DataTrigger { Binding = new Binding("Translation"), Value = "" }; empty.Setters.Add(new Setter(UIElement.VisibilityProperty, Visibility.Collapsed, "Translation")); template.Triggers.Add(empty);
         var hidden = new DataTrigger { Binding = new Binding("DataContext.ShowLyricTranslation") { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(LyricsView), 1) }, Value = false }; hidden.Setters.Add(new Setter(UIElement.VisibilityProperty, Visibility.Collapsed, "Translation")); template.Triggers.Add(hidden); return template;
     }

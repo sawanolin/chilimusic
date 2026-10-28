@@ -11,9 +11,16 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _coverTimer = new() { Interval = TimeSpan.FromMilliseconds(160) };
     private Point _dragStart; private int _dragIndex = -1;
     private void ImmersiveClick(object sender, RoutedEventArgs e) => Host.ShowImmersive();
+    private void PlayLibraryCard(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: LibraryItem item }) Vm.Run(() => Vm.PlayLibraryAsync(item));
+        e.Handled = true;
+    }
     public MainWindow(PlayerViewModel vm)
     {
         InitializeComponent(); WindowAppearance.Attach(this); DataContext = vm;
+        LibraryList.AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(LibraryPointerDown), true);
+        LibraryList.AddHandler(Mouse.MouseUpEvent, new MouseButtonEventHandler(LibraryPointerUp), true);
         AllowDrop = true; PreviewDragOver += (_, e) => { if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) { e.Effects = DragDropEffects.Copy; e.Handled = true; } }; PreviewDrop += (_, e) => { if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) { var files = (string[])e.Data.GetData(System.Windows.DataFormats.FileDrop); e.Handled = true; Vm.Run(() => Vm.OpenLocalFilesAsync(files)); } };
         void LayoutRows() { bool songs = vm.ShowSongs && !System.Windows.Data.CollectionViewSource.GetDefaultView(vm.Results).IsEmpty, albums = !System.Windows.Data.CollectionViewSource.GetDefaultView(vm.Library).IsEmpty && (vm.Section != "搜索" || vm.ShowAlbums); TrackRow.Height = new GridLength(songs ? albums ? 2 : 1 : albums ? 0 : 1, GridUnitType.Star); LibraryRow.Height = new GridLength(albums ? 1 : 0, GridUnitType.Star); EmptyPanel.Visibility = !songs && !albums ? Visibility.Visible : Visibility.Collapsed; EmptyHeading.Text = vm.IsBrowsing ? "正在加载…" : vm.Section == "本地音乐" ? "尚未添加本地音乐" : vm.Section == "离线音乐" ? "尚无离线歌曲" : "没有找到匹配的内容"; EmptyHint.Text = vm.IsBrowsing ? "" : vm.Section == "本地音乐" ? "打开音乐文件，或在设置中添加音乐目录。" : vm.Section == "离线音乐" ? "下载歌曲或专辑后，即可在断网时播放。" : "试试其他关键词，或调整筛选条件。"; }
         vm.Results.CollectionChanged += (_, _) => LayoutRows(); vm.Library.CollectionChanged += (_, _) => LayoutRows(); LayoutRows();
@@ -26,7 +33,7 @@ public partial class MainWindow : Window
         IsVisibleChanged += (_, _) => { if (IsVisible) { _coverTimer.Start(); } else { _coverTimer.Stop(); Vm.ReleaseBrowseImages(); } };
         Closing += (_, e) => { if (Host.Exiting) return; if (Vm.Settings.CloseToTray) { e.Cancel = true; Hide(); } else Host.Exit(); };
         var menu = new ContextMenu(); AddItem(menu, "立即播放", () => { if (TracksList.SelectedItem is Track t) Vm.Run(() => Vm.PlayBrowseTrackAsync(t)); }); AddItem(menu, "下一首播放", () => Vm.AddRange(SelectedTracks(), true)); AddItem(menu, "添加到队列", () => Vm.AddRange(SelectedTracks(), false)); TracksList.ContextMenu = menu;
-        var qm = new ContextMenu(); AddItem(qm, "移除", () => Vm.Remove(SelectedQueueIndex)); AddItem(qm, "上移", () => Vm.Move(SelectedQueueIndex, SelectedQueueIndex - 1)); AddItem(qm, "下移", () => Vm.Move(SelectedQueueIndex, SelectedQueueIndex + 1)); QueueList.ContextMenu = qm;
+        var qm = new ContextMenu(); AddItem(qm, "移除所选", RemoveSelectedQueueRows); AddItem(qm, "上移", () => Vm.Move(SelectedQueueIndex, SelectedQueueIndex - 1)); AddItem(qm, "下移", () => Vm.Move(SelectedQueueIndex, SelectedQueueIndex + 1)); QueueList.ContextMenu = qm;
         TracksList.SelectionMode = SelectionMode.Extended;
         AddItem(menu, "加入歌单…", () => Host.ShowTools("歌单", TracksList.SelectedItems.Cast<Track>().ToArray()));
         AddItem(menu, "下载到离线缓存", () => Vm.Run(() => Vm.DownloadSelectionAsync(TracksList.SelectedItems.Cast<Track>().ToArray())));
@@ -39,7 +46,7 @@ public partial class MainWindow : Window
         InitializeProduct();
     }
     private static void AddItem(ContextMenu menu, string name, Action action) { var item = new MenuItem { Header = name }; item.Click += (_, _) => action(); menu.Items.Add(item); }
-    private static ListBoxItem? Row(DependencyObject? node) { while (node != null && node is not ListBoxItem) node = VisualTreeHelper.GetParent(node); return node as ListBoxItem; }
+    private static ListBoxItem? Row(DependencyObject? node) { while (node != null && node is not ListBoxItem) node = node is FrameworkContentElement content ? content.Parent : VisualTreeHelper.GetParent(node); return node as ListBoxItem; }
     private void SelectRightClick(object sender, MouseButtonEventArgs e) { if (Row(e.OriginalSource as DependencyObject) is { } row && !row.IsSelected) { if (sender is ListBox list) list.SelectedItems.Clear(); row.IsSelected = true; } }
     public void FocusSearch() { SearchBox.Focus(); }
     public void FocusQueue() { QueueList.Focus(); }
@@ -82,7 +89,7 @@ public partial class MainWindow : Window
     private void VolumeWheel(object sender, MouseWheelEventArgs e) { Vm.Volume += Math.Sign(e.Delta) * 5; e.Handled = true; }
     private void MiniClick(object sender, RoutedEventArgs e) { Hide(); Host.ShowMini(); }
     private void InfoClick(object sender, RoutedEventArgs e) { var existing = Application.Current.Windows.Cast<Window>().OfType<InfoWindow>().FirstOrDefault(); if (existing != null) { existing.Activate(); return; } new InfoWindow(Vm) { Owner = this }.Show(); }
-    private void PlayResults(object sender, RoutedEventArgs e) { Vm.Run(() => Vm.PlayCompleteBrowseAsync()); }
+    private void PlayResults(object sender, RoutedEventArgs e) { Vm.Run(Vm.ToggleBrowsePlaybackAsync); }
     private void QueueDown(object sender, MouseButtonEventArgs e) { _dragStart = e.GetPosition(QueueList); var row = Row(e.OriginalSource as DependencyObject); _dragIndex = row == null ? -1 : QueueSourceIndex(QueueList.ItemContainerGenerator.IndexFromContainer(row)); }
     private void QueueMove(object sender, System.Windows.Input.MouseEventArgs e) { if (e.LeftButton != MouseButtonState.Pressed || _dragIndex < 0) return; var p = e.GetPosition(QueueList); if (Math.Abs(p.Y - _dragStart.Y) > 8) { System.Windows.DragDrop.DoDragDrop(QueueList, new DataObject("QueueIndex", _dragIndex), DragDropEffects.Move); _dragIndex = -1; } }
     private void QueueDrop(object sender, System.Windows.DragEventArgs e) { if (!e.Data.GetDataPresent("QueueIndex")) return; var row = Row(e.OriginalSource as DependencyObject); int to = row == null ? Vm.Queue.Count - 1 : QueueSourceIndex(QueueList.ItemContainerGenerator.IndexFromContainer(row)); Vm.Move((int)e.Data.GetData("QueueIndex"), to); }

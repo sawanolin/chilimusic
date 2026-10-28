@@ -11,10 +11,13 @@ public sealed partial class PlayerViewModel
     private string _browseQuery = "";
     private BrowseState? _beforeSearch;
     private readonly Stack<BrowseState> _browseHistory = new();
+    private readonly Stack<BrowseState> _browseForward = new();
+    private string _browseLocalView = "歌曲";
     internal event Action? BrowseLeaving;
     internal event Action<BrowseViewport>? BrowseArrived;
     internal BrowseViewport BrowseViewport { get; set; } = new();
     public bool CanGoBack => _browseHistory.Count > 0;
+    public bool CanGoForward => _browseForward.Count > 0;
     public string BrowseQuery => _browseQuery;
     public bool CanSortAlbums => _browseItem == null && Section is "最近添加" or "专辑";
     public bool IsSearch => Section == "搜索";
@@ -41,6 +44,7 @@ public sealed partial class PlayerViewModel
     public async Task BrowseAsync(string section, string query = "", LibraryItem? item = null, bool remember = true)
     {
         var current = CaptureBrowseState();
+        if (remember) { _browseForward.Clear(); Changed(nameof(CanGoForward)); }
         if (remember && (section != Section || item?.Id != _browseItem?.Id || section != "搜索" && query != _browseQuery))
         {
             _browseHistory.Push(current);
@@ -55,7 +59,8 @@ public sealed partial class PlayerViewModel
         if (remember && section == "搜索" && Section != "搜索") _beforeSearch = current;
         foreach (var album in Library) album.Cover = null;
         _browseCts.Cancel(); _browseCts.Dispose(); _browseCts = new(); int generation = ++_browseGeneration;
-        _browseItem = item; _browseQuery = query; _songOffset = _albumOffset = _artistOffset = 0;
+        _browseItem = item; _browseQuery = query; _songOffset = _albumOffset = _artistOffset = 0; _browseLocalView = LocalView;
+        CollectionViewSource.GetDefaultView(Results).SortDescriptions.Clear();
         if (item == null && section != "搜索") { Navigation = section; Settings.LastSection = section; SaveSettings(); }
         if (section != "搜索") { _searchCategory = "全部"; _formatFilter = "全部格式"; _artistFilter = _albumFilter = ""; Changed(nameof(SearchCategory)); Changed(nameof(FormatFilter)); Changed(nameof(ArtistFilter)); Changed(nameof(AlbumFilter)); }
         Section = section; Changed(nameof(BrowseQuery)); Changed(nameof(CanSortAlbums)); Changed(nameof(IsSearch)); Results.Clear(); Library.Clear(); HasMore = false; IsBrowsing = true; Status = "正在加载…";
@@ -68,11 +73,13 @@ public sealed partial class PlayerViewModel
         return new(Section, _browseQuery, _browseItem, Navigation, FormatFilter, ArtistFilter,
             AlbumFilter, SearchCategory, AlbumSort, Results.ToArray(), Library.ToArray(),
             _songOffset, _albumOffset, _artistOffset, HasMore,
-            IsBrowsing && Results.Count == 0 && Library.Count == 0, BrowseViewport);
+            IsBrowsing && Results.Count == 0 && Library.Count == 0, BrowseViewport, _browseLocalView,
+            CollectionViewSource.GetDefaultView(Results).SortDescriptions.ToArray());
     }
     public async Task NavigateSectionAsync(string section)
     {
         if (_browseItem == null && Section == section) return;
+        _browseForward.Clear(); Changed(nameof(CanGoForward));
         var previous = _browseHistory.FirstOrDefault(s => s.Section == section && s.Item == null && s.Sort == AlbumSort);
         if (previous == null) { await BrowseAsync(section); return; }
         while (_browseHistory.TryPop(out var state)) if (ReferenceEquals(state, previous)) break;
@@ -80,10 +87,13 @@ public sealed partial class PlayerViewModel
     }
     private async Task RestoreBrowseAsync(BrowseState state)
     {
+        Settings.LocalView = _browseLocalView = state.LocalView; Changed(nameof(LocalView));
+        if (state.Section == "搜索" && _beforeSearch == null) _beforeSearch = _browseHistory.FirstOrDefault(s => s.Section != "搜索");
         if (state.WasLoading || state.Sort != AlbumSort)
         {
             await BrowseAsync(state.Section, state.Query, state.Item, remember: false);
             RestoreFilters(state.Format, state.Artist, state.Album, state.Category);
+            RestoreTrackSort(state);
             BrowseArrived?.Invoke(state.Viewport); return;
         }
         BrowseLeaving?.Invoke();
@@ -98,9 +108,15 @@ public sealed partial class PlayerViewModel
         foreach (var album in state.Albums) Library.Add(album);
         HasMore = state.HasMore; IsBrowsing = false;
         RestoreFilters(state.Format, state.Artist, state.Album, state.Category);
+        RestoreTrackSort(state);
         Changed(nameof(BrowseQuery)); Changed(nameof(CanSortAlbums)); Changed(nameof(IsSearch));
         Status = $"{Section} · {Results.Count} 首歌曲，{Library.Count} 个项目";
         BrowseArrived?.Invoke(state.Viewport);
+    }
+    private void RestoreTrackSort(BrowseState state)
+    {
+        var view = CollectionViewSource.GetDefaultView(Results);
+        using (view.DeferRefresh()) { view.SortDescriptions.Clear(); foreach (var sort in state.TrackSort ?? []) view.SortDescriptions.Add(sort); }
     }
     public async Task LoadMoreAsync()
     {
@@ -194,7 +210,9 @@ public sealed partial class PlayerViewModel
     public void ReleaseBrowseImages() { _coverViewportGeneration++; foreach (var item in Library) item.Cover = null; Covers.ClearDecoded(); }
     public async Task ClearSearchAsync()
     {
-        if (Section != "搜索") return; var previous = _beforeSearch; _beforeSearch = null;
+        if (Section != "搜索") return;
+        _browseForward.Push(CaptureBrowseState()); Changed(nameof(CanGoForward));
+        var previous = _beforeSearch; _beforeSearch = null;
         if (previous != null)
         {
             if (_browseHistory.Contains(previous))
@@ -211,7 +229,14 @@ public sealed partial class PlayerViewModel
     public async Task GoBackAsync()
     {
         if (!_browseHistory.TryPop(out var previous)) return;
+        _browseForward.Push(CaptureBrowseState()); Changed(nameof(CanGoForward));
         Changed(nameof(CanGoBack)); await RestoreBrowseAsync(previous);
+    }
+    public async Task GoForwardAsync()
+    {
+        if (!_browseForward.TryPop(out var next)) return;
+        _browseHistory.Push(CaptureBrowseState()); Changed(nameof(CanGoBack)); Changed(nameof(CanGoForward));
+        await RestoreBrowseAsync(next);
     }
     public Task PlayBrowseTrackAsync(Track track) => PlayCompleteBrowseAsync(track);
     public async Task PlayLibraryAsync(LibraryItem item, bool enqueue = false)

@@ -7,9 +7,9 @@ namespace ChiliMusic;
 
 internal static class UiFactory
 {
-    public static TextBlock Text(string text, double size = 12) { var block = new TextBlock { Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 5) }; block.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush"); return block; }
-    public static TextBox Input(string text = "", double width = double.NaN) => new() { Text = text, FontSize = 12, Height = 36, Width = width, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 3, 0, 7) };
-    public static Button Button(string text, Action action, bool primary = false) { var button = new Button { Content = text, Height = 34, Padding = new Thickness(11, 0, 11, 0), Margin = new Thickness(0, 3, 7, 4) }; if (primary) button.SetResourceReference(FrameworkElement.StyleProperty, "AccentButton"); button.Click += (_, _) => action(); return button; }
+    public static TextBlock Text(string text, double size = 13) { var block = new TextBlock { Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 5) }; block.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush"); return block; }
+    public static TextBox Input(string text = "", double width = double.NaN) => new() { Text = text, FontSize = 13, Height = 36, Width = width, VerticalContentAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 3, 0, 7) };
+    public static Button Button(string text, Action action, bool primary = false) { var button = new Button { Content = text, Height = 36, Padding = new Thickness(11, 0, 11, 0), Margin = new Thickness(0, 3, 7, 4) }; if (primary) button.SetResourceReference(FrameworkElement.StyleProperty, "AccentButton"); button.Click += (_, _) => action(); return button; }
     public static CheckBox Check(string text, bool value) => new() { Content = text, IsChecked = value, Margin = new Thickness(0, 5, 0, 7) };
     public static ComboBox Combo(IEnumerable<string> options, int selected = 0) => new() { ItemsSource = options, SelectedIndex = selected, Height = 36, Margin = new Thickness(0, 3, 0, 7) };
     public static WrapPanel Buttons(params Button[] buttons) { var row = new WrapPanel(); foreach (var button in buttons) row.Children.Add(button); return row; }
@@ -28,8 +28,8 @@ internal static class UiFactory
     }
     public static Grid SearchField(TextBox input, string hint)
     {
-        input.Height = 32; input.FontSize = 11; input.Padding = new Thickness(10, 0, 10, 0); var field = new Grid { Margin = new Thickness(0, 0, 0, 9) }; field.Children.Add(input);
-        var label = Text(hint, 10); label.Margin = new Thickness(11, 0, 8, 0); label.VerticalAlignment = VerticalAlignment.Center; label.IsHitTestVisible = false; label.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
+        input.Height = 32; input.FontSize = 12; input.Padding = new Thickness(10, 0, 10, 0); var field = new Grid { Margin = new Thickness(0, 0, 0, 9) }; field.Children.Add(input);
+        var label = Text(hint, 12); label.Margin = new Thickness(11, 0, 8, 0); label.VerticalAlignment = VerticalAlignment.Center; label.IsHitTestVisible = false; label.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
         var style = new Style(typeof(TextBlock)); style.Setters.Add(new Setter(UIElement.VisibilityProperty, Visibility.Collapsed)); var empty = new DataTrigger { Binding = new Binding("Text") { Source = input }, Value = "" }; empty.Setters.Add(new Setter(UIElement.VisibilityProperty, Visibility.Visible)); style.Triggers.Add(empty); label.Style = style; field.Children.Add(label); return field;
     }
     public static Grid ListWithEmptyState(ListBox list, string title, string description)
@@ -50,8 +50,8 @@ internal static class UiFactory
     }
     public static Border Card(string heading, params UIElement[] children)
     {
-        var panel = new StackPanel(); panel.Children.Add(new TextBlock { Text = heading, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 10) }); foreach (var child in children) panel.Children.Add(child);
-        var border = new Border { CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(1), Padding = new Thickness(16), Margin = new Thickness(0, 0, 0, 14), Child = panel }; border.SetResourceReference(Border.BackgroundProperty, "SurfaceBrush"); border.SetResourceReference(Border.BorderBrushProperty, "BorderBrush"); return border;
+        var panel = new StackPanel(); panel.Children.Add(new TextBlock { Text = heading, FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 10) }); foreach (var child in children) panel.Children.Add(child);
+        var border = new Border { CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(20), Margin = new Thickness(0, 0, 0, 20), Child = panel }; border.SetResourceReference(Border.BackgroundProperty, "SurfaceBrush"); border.SetResourceReference(Border.BorderBrushProperty, "BorderBrush"); return border;
     }
 }
 

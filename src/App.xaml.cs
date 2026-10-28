@@ -29,7 +29,7 @@ public partial class App : Application
         if (e.Args.Contains("--qa-netease-network")) { await NeteaseVerification.NetworkAsync(); Shutdown(); return; }
         if (e.Args.Contains("--allow-remote") || e.Args.Contains("--allow-remote-public")) { bool allowed = RemoteFirewall.Allow(e.Args.Contains("--allow-remote-public")); if (!allowed) MessageBox.Show("未能添加连接规则，请在 Windows 防火墙中允许 chilimusic 通过专用网络。", "chilimusic"); Shutdown(allowed ? 0 : 1); return; }
         if (e.Args.Contains("--self-test")) { try { await SelfTest.RunAsync(e.Args); Shutdown(0); } catch (Exception error) { Store.Write("selftest-failure.json", new { Error = error.GetType().Name, Message = error is ApiException ? error.Message : "验收失败" }); Shutdown(1); } return; }
-        if (e.Args.Contains("--qa-product") || e.Args.Contains("--qa-browse") || e.Args.Contains("--qa-remote") || e.Args.Contains("--qa-quality") || e.Args.Contains("--qa-immersive") || e.Args.Contains("--qa-usability") || e.Args.Contains("--qa-netease-ui") || e.Args.Contains("--qa-netease-full")) { FeatureVerification.RequireIsolatedProfile(); _remoteQa = true; }
+        if (e.Args.Contains("--qa-appearance") || e.Args.Contains("--qa-product") || e.Args.Contains("--qa-browse") || e.Args.Contains("--qa-remote") || e.Args.Contains("--qa-quality") || e.Args.Contains("--qa-immersive") || e.Args.Contains("--qa-usability") || e.Args.Contains("--qa-netease-ui") || e.Args.Contains("--qa-netease-full")) { FeatureVerification.RequireIsolatedProfile(); _remoteQa = true; }
         _mutex = new Mutex(true, @"Local\" + InstanceName, out _ownsMutex);
         if (!_ownsMutex) { try { using var pipe = new NamedPipeClientStream(".", InstanceName, PipeDirection.Out); await pipe.ConnectAsync(2000); using var writer = new StreamWriter(pipe, System.Text.Encoding.UTF8, leaveOpen: true); await writer.WriteLineAsync(System.Text.Json.JsonSerializer.Serialize(e.Args.Where(IsFileArgument).ToArray())); await writer.FlushAsync(); } catch (IOException) { } catch (TimeoutException) { } Shutdown(); return; }
         DispatcherUnhandledException += (_, args) => { Store.Log("ERROR", $"UI 异常 {args.Exception.GetType().Name}"); if (Vm != null) Vm.Status = "操作发生异常，请重试。"; args.Handled = true; };
@@ -42,7 +42,8 @@ public partial class App : Application
             Remote = new(Vm);
             try { Vm.Media = new(new WindowInteropHelper(_mini).Handle); Vm.Media.ButtonPressed += button => Dispatcher.BeginInvoke(() => OnMedia(button)); } catch (Exception ex) { Vm.Status = "系统媒体控制初始化失败"; Store.Log("ERROR", $"SMTC 初始化失败 {ex.GetType().Name}"); }
             CreateTray(); _taskbar = new(Vm, this); Vm.SettingsChanged += OnSettingsChanged; Store.Write("taskbar-diagnostics.json", _taskbar.Diagnostics()); _functionKeys = new(Vm); SystemEvents.UserPreferenceChanged += OnPreferences; _ = ListenAsync();
-            if (e.Args.Contains("--qa-product")) Vm.Run(() => ProductVerification.RunAsync(this));
+            if (e.Args.Contains("--qa-appearance")) Vm.Run(() => AppearanceVerification.RunAsync(this));
+            else if (e.Args.Contains("--qa-product")) Vm.Run(() => ProductVerification.RunAsync(this));
             else if (e.Args.Contains("--qa-netease-full")) Vm.Run(() => NeteaseVerification.FullAsync(this));
             else if (e.Args.Contains("--qa-netease-ui")) Vm.Run(() => NeteaseVerification.UiAsync(this));
             else if (e.Args.Contains("--qa-browse")) Vm.Run(() => BrowsePositionVerification.RunStandaloneAsync(this));

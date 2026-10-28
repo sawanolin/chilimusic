@@ -1,5 +1,5 @@
 #ifndef AppVersion
-#define AppVersion "1.3.5"
+#define AppVersion "1.3.6"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist"
@@ -70,7 +70,9 @@ Source: "{#Payload}README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Payload}CHANGELOG.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Payload}LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Payload}licenses\*.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
+Source: "{#Payload}licenses\Sonora-NOTICE.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "{#Payload}docs\images\main-product.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
+Source: "{#Payload}docs\images\immersive-player.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
 Source: "{#Payload}docs\images\taskbar-playing.png"; DestDir: "{app}\docs\images"; Flags: ignoreversion
 
 [Registry]

@@ -6,6 +6,8 @@ public sealed record ThemeChoice(string Id, string Name, string Preview) { publi
 public static class ThemeCatalog
 {
     public static IReadOnlyList<ColorTheme> All { get; } = [
+        new("sonora_light", "Sonora · 明亮", "#FAFAFA", "#FAFAFA", "#FFFFFF", "#F5F5F5", "#171717", "#333333", "#E8E8E8", "#E5E5E5", "#171717", "#737373"),
+        new("sonora_dark", "Sonora · 深邃", "#0A0A0A", "#0A0A0A", "#141414", "#171717", "#FAFAFA", "#E5E5E5", "#262626", "#292929", "#FAFAFA", "#909090", true),
         new("moon_white", "月华清霜", "#EDF3F7", "#EDF3F7", "#F9FBFC", "#FCFDFE", "#3478F6", "#2968DB", "#DDE9FB", "#D5E0E8"),
         new("peach_blossom", "花笺春信", "#FFF5F8", "#FFF5F8", "#FFF9FB", "#FFFCFD", "#D97898", "#C55F82", "#F8DFE8", "#EFD6DF", "#48303A", "#876776"),
         new("court_green", "庭芳新绿", "#F3F6ED", "#F3F6ED", "#FAFBF7", "#FCFDF9", "#6D9270", "#587D5D", "#DDE9D8", "#D8E1D0", "#314238", "#6F7F73"),
@@ -21,6 +23,6 @@ public static class ThemeCatalog
         new("caramel_mocha", "醇棕晨雾", "#251914", "#251914", "#3A2921", "#2D201A", "#C58B58", "#D6A06E", "#51382B", "#5C4133", "#FBF3EC", "#D2BCAE", true)
     ];
     public static IReadOnlyList<ThemeChoice> Choices { get; } = new[] { new ThemeChoice("System", "跟随系统", "#8494A8") }.Concat(All.Select(t => new ThemeChoice(t.Id, t.Name, t.Accent))).ToArray();
-    public static string Normalize(string mode) => mode switch { "Light" => "moon_white", "Dark" => "ink_blue", _ => Choices.Any(t => t.Id == mode) ? mode : "System" };
+    public static string Normalize(string mode) => mode switch { "Light" => "sonora_light", "Dark" => "sonora_dark", _ => Choices.Any(t => t.Id == mode) ? mode : "System" };
     public static ColorTheme Get(string id) => All.FirstOrDefault(t => t.Id == id) ?? All[0];
 }

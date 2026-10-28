@@ -83,6 +83,10 @@ public sealed partial class PlayerViewModel
         if (songs.Count == 0) { Status = "没有可播放的歌曲"; return; }
         await PlayFromListAsync(selected ?? songs[0], songs);
     }
+    public bool BrowseQueueMatches => !HasMore && Current != null && Results.Count > 0 &&
+        CollectionViewSource.GetDefaultView(Results) is CollectionView view && view.Count == Queue.Count &&
+        view.Cast<Track>().Where(MatchesTrackFilter).Select(t => t.Id).SequenceEqual(Queue.Select(t => t.Id));
+    public Task ToggleBrowsePlaybackAsync() => BrowseQueueMatches ? ToggleAsync() : PlayCompleteBrowseAsync();
     private bool MatchesTrackFilter(Track t) => (FormatFilter == "全部格式" || t.Format.Equals(FormatFilter, StringComparison.OrdinalIgnoreCase)) && Contains(t.Artist, ArtistFilter) && Contains(t.Album, AlbumFilter);
     private bool _completingFilter;
     private async Task CompleteFilterAsync()

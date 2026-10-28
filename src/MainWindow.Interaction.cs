@@ -26,6 +26,13 @@ public partial class MainWindow
         .Select(QueueSourceIndex).Where(i => i >= 0).ToArray();
     private Track[] SelectedTracks() => CollectionViewSource.GetDefaultView(Vm.Results).Cast<Track>().Where(TracksList.SelectedItems.Contains).ToArray();
     private void BackClick(object sender, RoutedEventArgs e) { _searchTimer.Stop(); Vm.Run(Vm.GoBackAsync); }
+    private void ForwardClick(object sender, RoutedEventArgs e) { _searchTimer.Stop(); Vm.Run(Vm.GoForwardAsync); }
+    internal void RemoveSelectedQueueRows()
+    {
+        int visible = QueueList.SelectedIndex; var indices = SelectedQueueIndices(); if (indices.Length == 0) return;
+        Vm.RemoveRange(indices);
+        if (QueueList.Items.Count > 0) QueueList.SelectedIndex = Math.Clamp(visible, 0, QueueList.Items.Count - 1);
+    }
     private void QueueFollowClick(object sender, RoutedEventArgs e)
     {
         if (Vm.Index < 0 || Vm.Index >= Vm.Queue.Count) return;
@@ -69,9 +76,27 @@ public partial class MainWindow
             }
             if (e.PropertyName == nameof(Vm.Current) && Vm.Current != null && !QueueList.IsKeyboardFocusWithin && !QueueList.IsMouseOver) QueueList.ScrollIntoView(Vm.Current);
         };
-        void RefreshActions() { PlayListButton.IsEnabled = TracksList.Items.Count > 0; QueueFollowButton.IsEnabled = Vm.Current != null; ClearQueueButton.IsEnabled = Vm.Queue.Count > 0; }
+        void RefreshActions()
+        {
+            PlayListButton.IsEnabled = TracksList.Items.Count > 0;
+            bool same = Vm.BrowseQueueMatches;
+            PlayListButton.Content = same ? Vm.IsProgressMoving ? "Ⅱ  暂停" : "▶  继续播放" : "▶  播放全部";
+            PlayListButton.ToolTip = same ? "控制当前列表，保留歌曲和播放位置" : "从当前列表开始播放";
+            QueueFollowButton.IsEnabled = Vm.Current != null; ClearQueueButton.IsEnabled = Vm.Queue.Count > 0;
+        }
         CollectionViewSource.GetDefaultView(Vm.Results).CollectionChanged += (_, _) => RefreshActions();
-        Vm.Queue.CollectionChanged += (_, _) => RefreshActions(); Vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Vm.Current)) RefreshActions(); }; RefreshActions();
+        Vm.Queue.CollectionChanged += (_, _) => RefreshActions(); Vm.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(Vm.Current) or nameof(Vm.IsProgressMoving) or nameof(Vm.HasMore)) RefreshActions(); }; RefreshActions();
+        PreviewMouseDown += (_, e) =>
+        {
+            if (e.ChangedButton == MouseButton.XButton1) { BackClick(this, new()); e.Handled = true; }
+            else if (e.ChangedButton == MouseButton.XButton2) { ForwardClick(this, new()); e.Handled = true; }
+        };
+        PreviewKeyDown += (_, e) =>
+        {
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (Keyboard.Modifiers != ModifierKeys.Alt || key is not (Key.Left or Key.Right)) return;
+            if (key == Key.Left) BackClick(this, new()); else ForwardClick(this, new()); e.Handled = true;
+        };
         SearchBox.PreviewKeyDown += (_, e) =>
         {
             if (e.Key == Key.Enter) { _searchTimer.Stop(); string query = SearchBox.Text.Trim(); Vm.Run(() => query.Length == 0 ? Vm.ClearSearchAsync() : Vm.BrowseAsync("搜索", query)); e.Handled = true; }
@@ -92,7 +117,8 @@ public partial class MainWindow
                 else return; e.Handled = true;
             }
             else if (e.Key == Key.Space) { Vm.Run(Vm.ToggleAsync); e.Handled = true; }
-            else if (QueueList.IsKeyboardFocusWithin && e.Key == Key.Delete) { int visible = QueueList.SelectedIndex; Vm.Remove(SelectedQueueIndex); if (QueueList.Items.Count > 0) QueueList.SelectedIndex = Math.Min(visible, QueueList.Items.Count - 1); e.Handled = true; }
+            else if (QueueList.IsKeyboardFocusWithin && e.Key == Key.Delete) { RemoveSelectedQueueRows(); e.Handled = true; }
+            else if (QueueList.IsKeyboardFocusWithin && e.Key == Key.Z && Keyboard.Modifiers == ModifierKeys.Control) { Vm.Run(Vm.UndoQueueAsync); e.Handled = true; }
             else if (QueueList.IsKeyboardFocusWithin && Keyboard.Modifiers == ModifierKeys.Alt && e.Key is Key.Up or Key.Down) { int from = SelectedQueueIndex; int to = from + (e.Key == Key.Up ? -1 : 1); Vm.Move(from, to); _queueSearch?.Clear(); if (to >= 0 && to < QueueList.Items.Count) QueueList.SelectedIndex = to; e.Handled = true; }
         };
     }

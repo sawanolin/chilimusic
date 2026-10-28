@@ -101,15 +101,15 @@ public sealed class AppSettings
     public bool CompactTracks { get; set; }
     public bool QueueVisible { get; set; } = true;
     public double QueueWidth { get; set; } = 254;
-    public double MainWidth { get; set; } = 1120;
-    public double MainHeight { get; set; } = 700;
+    public double MainWidth { get; set; } = 1200;
+    public double MainHeight { get; set; } = 800;
     public List<TrackColumnPreference> TrackColumns { get; set; } = [];
     public string SearchScope { get; set; } = "当前来源";
     public bool DeviceDisconnectPause { get; set; }
     public bool EqualizerEnabled { get; set; }
     public double[] Equalizer { get; set; } = new double[10];
     public Dictionary<string, AudioProfile> AudioProfiles { get; set; } = [];
-    public double LyricFontSize { get; set; } = 23;
+    public double LyricFontSize { get; set; } = 28;
     public double LyricSpacing { get; set; } = 9;
     public double LyricBackgroundOpacity { get; set; } = 1;
     public string DesktopLyricColor { get; set; } = "";

@@ -7,7 +7,7 @@ namespace ChiliMusic;
 
 public sealed class VirtualizingAlbumPanel : VirtualizingPanel, IScrollInfo
 {
-    private const double ItemWidth = 132, ItemHeight = 188;
+    private const double ItemWidth = 176, ItemHeight = 232;
     private int _columns = 1, _first;
     private Size _extent, _viewport;
     private double _offset;

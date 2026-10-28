@@ -7,8 +7,7 @@
    <Button Content="&#xE893;" Style="{StaticResource IconButton}" Command="{Binding NextCommand}" ToolTip="下一首" Margin="8,2"/>
    <Button Content="{Binding ModeIcon}" Style="{StaticResource IconButton}" Command="{Binding ModeCommand}" ToolTip="{Binding ModeText}" Foreground="{DynamicResource MutedBrush}"/>
   </StackPanel>
-  <local:PlaybackSeekSlider x:Name="SeekSlider" Minimum="0" ToolTip="拖动定位播放位置"/>
-  <DockPanel Margin="0,0,0,4"><TextBlock Text="{Binding DurationText}" DockPanel.Dock="Right" Foreground="{DynamicResource MutedBrush}" FontSize="10"/><TextBlock Text="{Binding PositionText}" Foreground="{DynamicResource MutedBrush}" FontSize="10"/></DockPanel>
+  <Grid Margin="0,3,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="40"/><ColumnDefinition Width="*"/><ColumnDefinition Width="40"/></Grid.ColumnDefinitions><TextBlock Text="{Binding PositionText}" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center"/><local:PlaybackSeekSlider x:Name="SeekSlider" Grid.Column="1" Minimum="0" ToolTip="拖动定位播放位置" VerticalAlignment="Center"/><TextBlock Grid.Column="2" Text="{Binding DurationText}" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Right"/></Grid>
   <DockPanel Visibility="{Binding ShowUtilities,RelativeSource={RelativeSource AncestorType=UserControl},Converter={StaticResource BoolVisible}}">
    <Button Content="{Binding FavoriteGlyph}" Command="{Binding FavoriteCommand}" ToolTip="收藏 / 取消收藏" Style="{StaticResource IconButton}" FontFamily="Segoe UI Symbol" FontSize="20"/>
    <Button Content="&#xE767;" Command="{Binding MuteCommand}" ToolTip="{Binding MuteText}" Style="{StaticResource IconButton}" Margin="6,2,0,2"/>

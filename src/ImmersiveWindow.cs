@@ -24,11 +24,12 @@ internal sealed class ImmersiveWindow : Window
         SetResourceReference(ForegroundProperty, "TextBrush"); SetResourceReference(FontFamilyProperty, "AppFont");
         WindowChrome.SetWindowChrome(this, new() { CaptionHeight = 44, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(0), UseAeroCaptionButtons = false });
         var frame = new Border { CornerRadius = new CornerRadius(10), BorderThickness = new Thickness(1) }; frame.SetResourceReference(Border.BackgroundProperty, "BackgroundBrush"); frame.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
-        var root = new Grid(); frame.Child = root; Content = frame;
-        var backdrop = new System.Windows.Controls.Image { Stretch = Stretch.UniformToFill, Opacity = 1, CacheMode = new BitmapCache(), Effect = new BlurEffect { Radius = 38, RenderingBias = RenderingBias.Performance }, IsHitTestVisible = false }; backdrop.SetBinding(System.Windows.Controls.Image.SourceProperty, new Binding("Cover")); root.Children.Add(backdrop);
+        var root = new Grid { ClipToBounds = true, Margin = new Thickness(1) }; frame.Child = root; Content = frame;
+        var backdrop = new System.Windows.Controls.Image { Stretch = Stretch.UniformToFill, Opacity = .28, CacheMode = new BitmapCache(), Effect = new BlurEffect { Radius = 90, RenderingBias = RenderingBias.Performance }, IsHitTestVisible = false }; backdrop.SetBinding(System.Windows.Controls.Image.SourceProperty, new Binding("Cover")); root.Children.Add(backdrop);
         var shade = new Border { IsHitTestVisible = false }; shade.SetResourceReference(Border.BackgroundProperty, "BackgroundBrush"); root.Children.Add(shade);
-        void UpdateTheme() => shade.Opacity = Theme.IsDark ? .60 : .70;
+        void UpdateTheme() => shade.Opacity = Theme.IsDark ? .58 : .78;
         Theme.Updated += UpdateTheme; UpdateTheme();
+        var atmosphere = new CoverAtmosphere(); atmosphere.SetBinding(CoverAtmosphere.ArtworkProperty, new Binding("Cover")); root.Children.Add(atmosphere);
         var layout = new Grid(); layout.RowDefinitions.Add(new() { Height = new GridLength(44) }); layout.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) }); layout.RowDefinitions.Add(new() { Height = new GridLength(120) }); root.Children.Add(layout);
         var header = new Grid { Margin = new Thickness(16, 0, 10, 0) }; header.ColumnDefinitions.Add(new() { Width = new GridLength(130) }); header.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) }); header.ColumnDefinitions.Add(new() { Width = new GridLength(130) }); layout.Children.Add(header);
         var back = new Button { Width = 78, Height = 34, HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(0), Margin = new Thickness(0), ToolTip = "返回音乐库 · Esc" }; back.SetResourceReference(StyleProperty, "IconButton"); back.SetResourceReference(FontFamilyProperty, "AppFont");

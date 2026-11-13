@@ -18,8 +18,8 @@ internal sealed class ProductOptionsWindow : DialogShell
         var keys = new Dictionary<string, ComboBox>(); var fileAction = UiFactory.Combo(["立即播放", "追加队列"], vm.Settings.FileOpenAction == "append" ? 1 : 0);
         var font = new Slider { Minimum = 14, Maximum = 38, Value = vm.Settings.LyricFontSize, TickFrequency = 1, IsSnapToTickEnabled = true, ToolTip = "歌词字号" };
         var spacing = new Slider { Minimum = 0, Maximum = 24, Value = vm.Settings.LyricSpacing, TickFrequency = 1, IsSnapToTickEnabled = true, ToolTip = "歌词行距" };
-        var opacity = new Slider { Minimum = .2, Maximum = 1, Value = vm.Settings.LyricBackgroundOpacity, TickFrequency = .1, IsSnapToTickEnabled = true, ToolTip = "桌面歌词背景透明度" };
-        var color = UiFactory.Input(vm.Settings.DesktopLyricColor); color.ToolTip = "留空跟随主题，或输入 #RRGGBB";
+        var desktopFont = new Slider { Minimum = 14, Maximum = 72, Value = vm.Settings.DesktopLyricFontSize, TickFrequency = 1, IsSnapToTickEnabled = true, ToolTip = "桌面歌词字号" };
+        var color = UiFactory.Input(vm.Settings.DesktopLyricColor); color.ToolTip = "留空使用白色，或输入 #RRGGBB";
         UIElement NumericSlider(Slider slider, string suffix, string format = "0")
         {
             var row = new DockPanel { Margin = new Thickness(0, 8, 0, 8) }; var value = UiFactory.Text(slider.Value.ToString(format) + suffix, 11); value.Width = 65; value.TextAlignment = TextAlignment.Right; DockPanel.SetDock(value, Dock.Right); row.Children.Add(value); slider.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(slider); slider.ValueChanged += (_, _) => value.Text = slider.Value.ToString(format) + suffix; return row;
@@ -31,8 +31,8 @@ internal sealed class ProductOptionsWindow : DialogShell
             font.ValueChanged += (_, _) => first.FontSize = font.Value; spacing.ValueChanged += (_, _) => next.Margin = new Thickness(0, spacing.Value, 0, 0);
             lyricPanel.Children.Add(UiFactory.Card("文字与间距", UiFactory.Row("字号", NumericSlider(font, " px")), UiFactory.Row("行距", NumericSlider(spacing, " px"))));
             var swatches = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 10) };
-            foreach (string hex in new[] { "", "#FFFFFF", "#263443", "#3478F6", "#B17BEB", "#F59E7C" }) { var swatch = UiFactory.Button(hex.Length == 0 ? "跟随主题" : "●", () => color.Text = hex); swatch.Width = hex.Length == 0 ? 85 : 34; swatch.Padding = new Thickness(0); if (hex.Length > 0) swatch.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)); swatches.Children.Add(swatch); }
-            lyricPanel.Children.Add(UiFactory.Card("桌面歌词", UiFactory.Row("背景透明度", NumericSlider(opacity, "", "0.0")), swatches, UiFactory.Row("文字颜色", color))); Body.Children.Add(Scroll(lyricPanel));
+            foreach (string hex in new[] { "", "#FFFFFF", "#263443", "#3478F6", "#B17BEB", "#F59E7C" }) { var swatch = UiFactory.Button(hex.Length == 0 ? "默认白色" : "●", () => color.Text = hex); swatch.Width = hex.Length == 0 ? 85 : 34; swatch.Padding = new Thickness(0); if (hex.Length > 0) swatch.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)); swatches.Children.Add(swatch); }
+            lyricPanel.Children.Add(UiFactory.Card("桌面歌词", UiFactory.Text("透明背景；移入歌词后可拖动，滚轮调整字号，右下角调整范围。", 11), UiFactory.Row("桌面字号", NumericSlider(desktopFont, " px")), swatches, UiFactory.Row("文字颜色", color))); Body.Children.Add(Scroll(lyricPanel));
         }
         else
         {
@@ -59,7 +59,7 @@ internal sealed class ProductOptionsWindow : DialogShell
         {
             try
             {
-                if (lyrics) { if (color.Text.Trim().Length > 0) _ = ColorConverter.ConvertFromString(color.Text.Trim()); vm.Settings.LyricFontSize = font.Value; vm.Settings.LyricSpacing = spacing.Value; vm.Settings.LyricBackgroundOpacity = opacity.Value; vm.Settings.DesktopLyricColor = color.Text.Trim(); vm.ApplyLyricAppearance(); }
+                if (lyrics) { if (color.Text.Trim().Length > 0) _ = ColorConverter.ConvertFromString(color.Text.Trim()); vm.Settings.LyricFontSize = font.Value; vm.Settings.LyricSpacing = spacing.Value; vm.Settings.DesktopLyricFontSize = desktopFont.Value; vm.Settings.DesktopLyricColor = color.Text.Trim(); vm.ApplyLyricAppearance(); }
                 else
                 {
                     int Key(string label) => keys[label].SelectedIndex == 0 ? 0 : 0x6f + keys[label].SelectedIndex; var all = new[] { vm.Settings.PlayKey, vm.Settings.PauseKey, Key("下一首"), Key("上一首"), Key("音量增加"), Key("音量减少") }.Where(k => k != 0).ToArray(); if (all.Distinct().Count() != all.Length) throw new ApiException("全局快捷键不能重复。"); if (all.Any(k => !FunctionKeyService.KeyAvailable(k))) throw new ApiException("某个快捷键已被系统或其他程序占用。");

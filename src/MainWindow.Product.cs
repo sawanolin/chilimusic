@@ -49,12 +49,12 @@ public partial class MainWindow
             BrowseActions.Visibility = detail || Vm.Results.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             ListHeading.Text = Vm.Library.Count > 0 && Vm.Results.Count == 0 ? $"{(Vm.IsLocalCatalog ? Vm.LocalView : Vm.Navigation)} · {Vm.Library.Count}" : $"歌曲 · {Vm.Results.Count}";
             bool artist = Vm.BrowseItem?.Kind is "artist" or "local-artist";
-            HeroCover.Clip = artist ? new EllipseGeometry(new Point(artSize / 2, artSize / 2), artSize / 2, artSize / 2) : new RectangleGeometry(new Rect(0, 0, artSize, artSize), 8, 8);
-            HeroCoverBorder.CornerRadius = new CornerRadius(artist ? artSize / 2 : 8);
+            HeroCover.Clip = artist ? new EllipseGeometry(new Point(artSize / 2, artSize / 2), artSize / 2, artSize / 2) : null;
+            HeroCoverBorder.CornerRadius = new CornerRadius(artist ? artSize / 2 : 0);
             BreadcrumbText.Text = detail ? Vm.CatalogName + "  ›  " + (Vm.Navigation == Vm.CatalogName ? "专辑" : Vm.Navigation) + "  ›  " + Vm.Section : Vm.CatalogName == Vm.Section ? Vm.CatalogName : Vm.CatalogName + "  ›  " + Vm.Section;
             PageHeading.FontSize = detail ? (compact ? 28 : 36) : 30;
             RefreshDetailCover();
-            LocalViewBox.Visibility = !detail && (Vm.IsLocalCatalog || Vm.Navigation == "本地音乐") ? Visibility.Visible : Visibility.Collapsed;
+            LocalViewBox.Visibility = !detail && Vm.Section != "所有歌曲" && (Vm.IsLocalCatalog || Vm.Navigation == "本地音乐") ? Visibility.Visible : Visibility.Collapsed;
         }
         Vm.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(Vm.Section) or nameof(Vm.BrowseSummary) or nameof(Vm.CatalogSource) or nameof(Vm.AlbumDetail)) DetailChanged(); }; DetailChanged();
         SizeChanged += (_, _) => DetailChanged();

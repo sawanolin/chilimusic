@@ -24,7 +24,7 @@ public sealed partial class PlayerViewModel
             tracks.AddRange(history.Skip(_songOffset).Take(PageSize)); _songOffset += tracks.Count; more = _songOffset < history.Count; return true;
         }
         bool detail = _browseItem?.Kind is "local-album" or "local-artist" or "local-genre" or "local-year" or "local-folder";
-        bool local = IsLocalCatalog && Section is "最近添加" or "专辑" or "歌手" or "流派" or "年份" or "文件夹" or "最近播放" or "收藏" or "随机" || Section == "本地音乐" && LocalView != "歌曲";
+        bool local = IsLocalCatalog && Section is "所有歌曲" or "最近添加" or "专辑" or "歌手" or "流派" or "年份" or "文件夹" or "最近播放" or "收藏" or "随机" || Section == "本地音乐" && LocalView != "歌曲";
         if (!detail && !local) return false;
         if (detail) { var all = LocalItemTracks(_browseItem!).OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber).ThenBy(t => t.Title).ToList(); tracks.AddRange(_browseItem!.Kind == "local-album" ? all : all.Skip(_songOffset).Take(PageSize)); _songOffset += tracks.Count; more = _songOffset < all.Count; return true; }
         string view = Section == "本地音乐" ? LocalView : Section;

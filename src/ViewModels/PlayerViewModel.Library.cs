@@ -160,10 +160,11 @@ public sealed partial class PlayerViewModel
         else if (Section == "随机") tracks.AddRange(Api.Configured ? await Api.RandomAsync() : _localTracks.OrderBy(_ => Random.Shared.Next()));
         else if (Api.Configured)
         {
-            string endpoint = Section == "搜索" ? "search3" : Section == "歌手" ? "getArtists" : "getAlbumList2";
+            bool allSongs = Section == "所有歌曲";
+            string endpoint = Section == "搜索" || allSongs ? "search3" : Section == "歌手" ? "getArtists" : "getAlbumList2";
             var args = new List<(string Key, string Value)>();
             if (_browseItem != null) { endpoint = _browseItem.Kind switch { "artist" => "getArtist", "playlist" => "getPlaylist", _ => "getAlbum" }; args.Add(("id", _browseItem.Id)); }
-            else if (endpoint == "search3") { args.Add(("query", _browseQuery)); args.Add(("songCount", PageSize.ToString())); args.Add(("albumCount", "30")); args.Add(("artistCount", "30")); args.Add(("songOffset", _songOffset.ToString())); args.Add(("albumOffset", _albumOffset.ToString())); args.Add(("artistOffset", _artistOffset.ToString())); }
+            else if (endpoint == "search3") { args.Add(("query", allSongs ? "" : _browseQuery)); args.Add(("songCount", PageSize.ToString())); args.Add(("albumCount", allSongs ? "0" : "30")); args.Add(("artistCount", allSongs ? "0" : "30")); args.Add(("songOffset", _songOffset.ToString())); args.Add(("albumOffset", _albumOffset.ToString())); args.Add(("artistOffset", _artistOffset.ToString())); }
             else if (endpoint == "getAlbumList2") { args.Add(("type", Section == "最近播放" ? "recent" : Section == "最近添加" ? "newest" : Settings.AlbumSort)); args.Add(("size", PageSize.ToString())); args.Add(("offset", _albumOffset.ToString())); }
             var root = await Api.CallAsync(endpoint, ct, args.ToArray());
             if (ct.IsCancellationRequested || generation != _browseGeneration) return;
@@ -171,7 +172,7 @@ public sealed partial class PlayerViewModel
             {
                 tracks.AddRange(NavidromeApiClient.Tracks(root, "searchResult3")); Rows(search, "album", "album", items); Rows(search, "artist", "artist", items);
                 int albumCount = items.Count(i => i.Kind == "album"), artistCount = items.Count(i => i.Kind == "artist"); _songOffset += tracks.Count; _albumOffset += albumCount; _artistOffset += artistCount;
-                more = tracks.Count == PageSize || albumCount == 30 || artistCount == 30;
+                more = tracks.Count == PageSize || !allSongs && (albumCount == 30 || artistCount == 30);
             }
             if (endpoint == "getAlbum") tracks.AddRange(NavidromeApiClient.Tracks(root, "album").OrderBy(t => t.DiscNumber).ThenBy(t => t.TrackNumber));
             if (endpoint == "getPlaylist") tracks.AddRange(NavidromeApiClient.Tracks(root, "playlist", "entry"));

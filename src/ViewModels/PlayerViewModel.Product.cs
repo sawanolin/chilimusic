@@ -118,7 +118,8 @@ public sealed partial class PlayerViewModel
     {
         Application.Current.Resources["LyricFontSize"] = Math.Clamp(Settings.LyricFontSize, 14, 38);
         Application.Current.Resources["LyricMargin"] = new System.Windows.Thickness(12, Math.Clamp(Settings.LyricSpacing, 0, 24), 12, Math.Clamp(Settings.LyricSpacing, 0, 24));
-        Application.Current.Resources["DesktopLyricOpacity"] = Math.Clamp(Settings.LyricBackgroundOpacity, .2, 1);
-        Application.Current.Resources["DesktopLyricBrush"] = string.IsNullOrWhiteSpace(Settings.DesktopLyricColor) ? Application.Current.FindResource("TextBrush") : new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(Settings.DesktopLyricColor));
+        Application.Current.Resources["DesktopLyricFontSize"] = Math.Clamp(Settings.DesktopLyricFontSize, 14, 72);
+        Application.Current.Resources["DesktopLyricSecondaryFontSize"] = Math.Clamp(Settings.DesktopLyricFontSize * .6, 12, 44);
+        Application.Current.Resources["DesktopLyricBrush"] = string.IsNullOrWhiteSpace(Settings.DesktopLyricColor) ? System.Windows.Media.Brushes.White : new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(Settings.DesktopLyricColor));
     }
 }

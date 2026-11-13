@@ -11,9 +11,9 @@ public partial class MiniPlayerWindow : Window
     }
     public void Popup()
     {
-        Show(); var cursor = System.Windows.Forms.Cursor.Position; var area = System.Windows.Forms.Screen.FromPoint(cursor).WorkingArea;
+        Show(); UpdateLayout(); var cursor = System.Windows.Forms.Cursor.Position; var area = System.Windows.Forms.Screen.FromPoint(cursor).WorkingArea;
         var source = PresentationSource.FromVisual(this); var scale = source?.CompositionTarget?.TransformFromDevice ?? System.Windows.Media.Matrix.Identity;
-        var bottom = scale.Transform(new Point(area.Right, area.Bottom)); Left = bottom.X - Width - 10; Top = bottom.Y - Height - 10; Activate();
+        var bottom = scale.Transform(new Point(area.Right, area.Bottom)); Left = bottom.X - ActualWidth - 10; Top = bottom.Y - ActualHeight - 10; Activate();
     }
     private void Expand(object sender, RoutedEventArgs e) { Hide(); Host.ShowMain(); }
     private void QueueClick(object sender, RoutedEventArgs e) { Hide(); Host.ShowMain(true); }

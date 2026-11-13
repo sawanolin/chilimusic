@@ -113,6 +113,9 @@ public sealed class AppSettings
     public double LyricSpacing { get; set; } = 9;
     public double LyricBackgroundOpacity { get; set; } = 1;
     public string DesktopLyricColor { get; set; } = "";
+    public double DesktopLyricFontSize { get; set; } = 28;
+    public double DesktopLyricWidth { get; set; } = 620;
+    public double DesktopLyricHeight { get; set; } = 180;
     public int NextKey { get; set; }
     public int PreviousKey { get; set; }
     public int VolumeUpKey { get; set; }

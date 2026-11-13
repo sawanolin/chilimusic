@@ -129,7 +129,7 @@ public partial class App : Application
     }
     public void ShowMain(bool queue = false, bool search = false)
     {
-        _mini?.Hide(); bool created = _main == null; _main ??= new(Vm); _main.Show(); _main.WindowState = WindowState.Normal; _main.Activate(); if (created) Vm.Run(() => Vm.BrowseAsync(Vm.Settings.LastSection is "最近添加" or "专辑" or "歌手" or "歌单" or "本地音乐" or "离线音乐" or "本机历史" ? Vm.Settings.LastSection : Vm.IsLocalCatalog ? "本地音乐" : "最近添加")); if (queue) _main.FocusQueue(); if (search) _main.FocusSearch();
+        _mini?.Hide(); bool created = _main == null; _main ??= new(Vm); _main.Show(); _main.WindowState = WindowState.Normal; _main.Activate(); if (created) Vm.Run(() => Vm.BrowseAsync(Vm.Settings.LastSection is "所有歌曲" or "最近添加" or "专辑" or "歌手" or "歌单" or "本地音乐" or "离线音乐" or "本机历史" ? Vm.Settings.LastSection : Vm.IsLocalCatalog ? "本地音乐" : "最近添加")); if (queue) _main.FocusQueue(); if (search) _main.FocusSearch();
     }
     public void ShowSettings() { _mini?.Hide(); if (_settingsWindow != null) { _settingsWindow.Activate(); return; } _settingsWindow = new(Vm); _settingsWindow.Closed += (_, _) => _settingsWindow = null; _settingsWindow.Show(); }
     public void ShowRemote() { if (_remoteWindow == null) { _remoteWindow = new(Remote); _remoteWindow.Closed += (_, _) => _remoteWindow = null; } _remoteWindow.Show(); _remoteWindow.Activate(); }

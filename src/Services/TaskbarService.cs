@@ -90,7 +90,7 @@ public sealed class TaskbarService : IDisposable
             if (_vm.Settings.TaskbarShowCover && _cover != null) { g.DrawImage(_cover, coverRect); }
             else if (_vm.Settings.TaskbarShowCover)
             {
-                g.FillEllipse(System.Drawing.Brushes.RoyalBlue, coverRect);
+                g.FillRectangle(System.Drawing.Brushes.RoyalBlue, coverRect);
                 using var note = new System.Drawing.Font("Segoe UI", 20, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Pixel);
                 using var glyph = new GraphicsPath(); using var format = (System.Drawing.StringFormat)System.Drawing.StringFormat.GenericTypographic.Clone();
                 glyph.AddString("♪", note.FontFamily, (int)note.Style, note.Size, new System.Drawing.PointF(0, 0), format);

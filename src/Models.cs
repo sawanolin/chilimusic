@@ -99,6 +99,8 @@ public sealed class AppSettings
     public string LastSection { get; set; } = "最近添加";
     public bool DetailedTracks { get; set; } = true;
     public bool CompactTracks { get; set; }
+    public bool DetailedAlbumTracks { get; set; }
+    public bool QueuePinned { get; set; }
     public bool QueueVisible { get; set; } = true;
     public double QueueWidth { get; set; } = 254;
     public double MainWidth { get; set; } = 1200;

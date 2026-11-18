@@ -22,11 +22,20 @@ public partial class MainWindow : Window
         LibraryList.AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(LibraryPointerDown), true);
         LibraryList.AddHandler(Mouse.MouseUpEvent, new MouseButtonEventHandler(LibraryPointerUp), true);
         AllowDrop = true; PreviewDragOver += (_, e) => { if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) { e.Effects = DragDropEffects.Copy; e.Handled = true; } }; PreviewDrop += (_, e) => { if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) { var files = (string[])e.Data.GetData(System.Windows.DataFormats.FileDrop); e.Handled = true; Vm.Run(() => Vm.OpenLocalFilesAsync(files)); } };
-        void LayoutRows() { bool songs = vm.ShowSongs && !System.Windows.Data.CollectionViewSource.GetDefaultView(vm.Results).IsEmpty, albums = !System.Windows.Data.CollectionViewSource.GetDefaultView(vm.Library).IsEmpty && (vm.Section != "搜索" || vm.ShowAlbums); TrackRow.Height = new GridLength(songs ? albums ? 2 : 1 : albums ? 0 : 1, GridUnitType.Star); LibraryRow.Height = new GridLength(albums ? 1 : 0, GridUnitType.Star); EmptyPanel.Visibility = !songs && !albums ? Visibility.Visible : Visibility.Collapsed; EmptyHeading.Text = vm.IsBrowsing ? "正在加载…" : vm.Section == "本地音乐" ? "尚未添加本地音乐" : vm.Section == "离线音乐" ? "尚无离线歌曲" : "没有找到匹配的内容"; EmptyHint.Text = vm.IsBrowsing ? "" : vm.Section == "本地音乐" ? "打开音乐文件，或在设置中添加音乐目录。" : vm.Section == "离线音乐" ? "下载歌曲或专辑后，即可在断网时播放。" : "试试其他关键词，或调整筛选条件。"; }
+        void LayoutRows()
+        {
+            bool songs = vm.ShowSongs && !System.Windows.Data.CollectionViewSource.GetDefaultView(vm.Results).IsEmpty;
+            bool cards = !System.Windows.Data.CollectionViewSource.GetDefaultView(vm.Library).IsEmpty && (!vm.IsSearch || vm.ShowAlbums);
+            TrackRow.Height = new GridLength(cards ? songs ? 2 : 0 : 1, GridUnitType.Star);
+            LibraryRow.Height = new GridLength(cards ? 1 : 0, GridUnitType.Star);
+            EmptyPanel.Visibility = Shown(!songs && !cards);
+            if (!songs && !cards) UpdateEmptyState();
+            UpdateSongView();
+        }
         vm.Results.CollectionChanged += (_, _) => LayoutRows(); vm.Library.CollectionChanged += (_, _) => LayoutRows(); LayoutRows();
         System.Windows.Data.CollectionViewSource.GetDefaultView(vm.Results).CollectionChanged += (_, _) => LayoutRows(); System.Windows.Data.CollectionViewSource.GetDefaultView(vm.Library).CollectionChanged += (_, _) => LayoutRows();
         Loaded += (_, _) => { UpdateNavigation(); CategoryBox.SelectedIndex = FormatBox.SelectedIndex = 0; SortBox.SelectedItem = SortBox.Items.Cast<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == vm.AlbumSort); };
-        vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(vm.Navigation)) UpdateNavigation(); if (e.PropertyName is nameof(vm.ShowSongs) or nameof(vm.ShowAlbums) or nameof(vm.Section) or nameof(vm.IsBrowsing)) LayoutRows(); if (e.PropertyName is nameof(vm.ArtistFilter) or nameof(vm.AlbumFilter)) { int filters = (string.IsNullOrWhiteSpace(vm.ArtistFilter) ? 0 : 1) + (string.IsNullOrWhiteSpace(vm.AlbumFilter) ? 0 : 1); FilterButton.ToolTip = filters == 0 ? "筛选与搜索范围" : $"筛选与搜索范围 · {filters} 项"; } };
+        vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(vm.Navigation)) UpdateNavigation(); if (e.PropertyName is nameof(vm.ShowSongs) or nameof(vm.ShowAlbums) or nameof(vm.Section) or nameof(vm.IsBrowsing) or nameof(vm.BrowseFailed)) LayoutRows(); if (e.PropertyName is nameof(vm.IsBrowsing) or nameof(vm.HasMore) or nameof(vm.BrowseFailed)) UpdateBrowseFooter(); if (e.PropertyName is nameof(vm.ArtistFilter) or nameof(vm.AlbumFilter)) { int filters = (string.IsNullOrWhiteSpace(vm.ArtistFilter) ? 0 : 1) + (string.IsNullOrWhiteSpace(vm.AlbumFilter) ? 0 : 1); FilterButton.ToolTip = filters == 0 ? "筛选与搜索范围" : $"筛选与搜索范围 · {filters} 项"; } };
         _searchTimer.Tick += (_, _) => { _searchTimer.Stop(); Vm.Run(() => string.IsNullOrWhiteSpace(SearchBox.Text) ? Vm.ClearSearchAsync() : Vm.BrowseAsync("搜索", SearchBox.Text)); };
         _coverTimer.Tick += (_, _) => { _coverTimer.Stop(); RefreshVisibleCovers(); };
         LibraryList.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(BrowseScrolled)); TracksList.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler(BrowseScrolled));
@@ -36,7 +45,7 @@ public partial class MainWindow : Window
         var qm = new ContextMenu(); AddItem(qm, "移除所选", RemoveSelectedQueueRows); AddItem(qm, "上移", () => Vm.Move(SelectedQueueIndex, SelectedQueueIndex - 1)); AddItem(qm, "下移", () => Vm.Move(SelectedQueueIndex, SelectedQueueIndex + 1)); QueueList.ContextMenu = qm;
         TracksList.SelectionMode = SelectionMode.Extended;
         AddItem(menu, "加入歌单…", () => Host.ShowTools("歌单", TracksList.SelectedItems.Cast<Track>().ToArray()));
-        AddItem(menu, "下载到离线缓存", () => Vm.Run(() => Vm.DownloadSelectionAsync(TracksList.SelectedItems.Cast<Track>().ToArray())));
+        AddItem(menu, "下载到离线缓存", () => Vm.Run(() => Vm.DownloadSelectionAsync(SelectedTracks().Where(t => !t.IsLocal && !t.IsNetease).ToArray())));
         AddItem(menu, "添加音乐文件夹…", OpenMusicFolder);
         var albumsMenu = new ContextMenu(); AddItem(albumsMenu, "打开", () => { if (LibraryList.SelectedItem is LibraryItem item) Vm.Run(() => Vm.BrowseAsync(item.Title, item: item)); }); AddItem(albumsMenu, "下载专辑", () => { if (LibraryList.SelectedItem is LibraryItem item) { Host.ShowTools("离线"); Vm.Run(() => Vm.DownloadAlbumAsync(item)); } }); LibraryList.ContextMenu = albumsMenu; LibraryList.PreviewMouseRightButtonDown += SelectRightClick;
         AddItem(qm, "保存到歌单…", () => Host.ShowTools("歌单", Vm.Queue.ToArray()));
@@ -49,7 +58,7 @@ public partial class MainWindow : Window
     private static ListBoxItem? Row(DependencyObject? node) { while (node != null && node is not ListBoxItem) node = node is FrameworkContentElement content ? content.Parent : VisualTreeHelper.GetParent(node); return node as ListBoxItem; }
     private void SelectRightClick(object sender, MouseButtonEventArgs e) { if (Row(e.OriginalSource as DependencyObject) is { } row && !row.IsSelected) { if (sender is ListBox list) list.SelectedItems.Clear(); row.IsSelected = true; } }
     public void FocusSearch() { SearchBox.Focus(); }
-    public void FocusQueue() { QueueList.Focus(); }
+    public void FocusQueue() { if (!QueueBorder.IsVisible) SetQueueOpen(true); QueueList.Focus(); }
     private void Navigate(object sender, RoutedEventArgs e) { _searchTimer.Stop(); Vm.Run(() => Vm.NavigateSectionAsync(((Button)sender).Content.ToString()!)); }
     private void UpdateNavigation() { foreach (var button in NavigationStack.Children.OfType<Button>()) { bool selected = button.Content.ToString() == Vm.Navigation; button.SetResourceReference(Button.BackgroundProperty, selected ? "SelectedBrush" : "SidebarBrush"); button.SetResourceReference(Button.ForegroundProperty, selected ? "AccentBrush" : "TextBrush"); button.ApplyTemplate(); if (button.Template.FindName("Indicator", button) is FrameworkElement indicator) indicator.Visibility = selected ? Visibility.Visible : Visibility.Collapsed; } }
     private void SearchChanged(object sender, TextChangedEventArgs e) { _searchTimer.Stop(); if (!_syncSearch) _searchTimer.Start(); }
@@ -61,7 +70,41 @@ public partial class MainWindow : Window
     private void RemoteClick(object sender, RoutedEventArgs e) => Host.ShowRemote();
     private void LyricsClick(object sender, RoutedEventArgs e) => Host.ShowTools("歌词");
     private void FiltersClick(object sender, RoutedEventArgs e) => FilterPopup.IsOpen = !FilterPopup.IsOpen;
-    private void LoadMoreClick(object sender, RoutedEventArgs e) => Vm.Run(Vm.LoadMoreAsync);
+    private void UpdateEmptyState()
+    {
+        bool filtered = Vm.FormatFilter != "全部格式" || Vm.ArtistFilter.Length > 0 || Vm.AlbumFilter.Length > 0 || Vm.IsSearch && Vm.SearchCategory != "全部";
+        bool library = !Vm.HasLocalTracks && Vm.IsLocalCatalog && Vm.BrowseItem == null &&
+            Vm.Section is "本地音乐" or "所有歌曲" or "专辑" or "歌手" or "最近添加";
+        bool ready = !Vm.IsBrowsing;
+        bool connect = !Vm.IsSearch && Vm.CatalogSource == "navidrome" && !Vm.Api.NavidromeConfigured;
+        bool login = !Vm.IsSearch && Vm.IsNeteaseCatalog && !Vm.Api.Netease.LoggedIn;
+        EmptyClear.Visibility = Shown(ready && Vm.IsSearch);
+        EmptyReset.Visibility = Shown(ready && filtered);
+        EmptyAdd.Visibility = Shown(ready && library && !filtered);
+        EmptyConnect.Visibility = Shown(ready && connect);
+        EmptyLogin.Visibility = Shown(ready && login);
+        EmptyHeading.Text = Vm.IsBrowsing ? "正在加载…" : Vm.BrowseFailed ? "曲库加载失败" :
+            filtered || Vm.IsSearch ? "没有找到匹配的内容" : library ? "尚未添加本地音乐" :
+            connect ? "连接你的 Navidrome 曲库" : login ? "登录后查看网易云音乐" : $"暂无{Vm.Section}";
+        EmptyHint.Text = Vm.IsBrowsing ? "" : Vm.BrowseFailed ? "可以重新加载此页。" :
+            Vm.IsSearch ? "试试其他关键词。" : filtered ? "调整或重置筛选条件。" :
+            library ? "选择存放音乐的文件夹，或把音乐文件拖到这里。" :
+            Vm.Section == "离线音乐" ? "下载歌曲或专辑后，即可在断网时播放。" : "";
+        EmptyHint.Visibility = Shown(EmptyHint.Text.Length > 0);
+    }
+    private void UpdateBrowseFooter()
+    {
+        bool retry = Vm.BrowseFailed;
+        BrowseFooter.Visibility = Shown(Vm.HasMore || retry || Vm.IsBrowsing && (Vm.Results.Count + Vm.Library.Count > 0));
+        MorePageButton.Visibility = Shown(!Vm.IsBrowsing && (retry || Vm.HasMore));
+        MorePageButton.Content = retry ? "重试" : "加载更多";
+        BrowseFooterText.Text = Vm.IsBrowsing ? "正在加载…" : retry ? "加载失败" : "还有更多内容";
+    }
+    private void EmptyClearClick(object sender, RoutedEventArgs e) { _searchTimer.Stop(); Vm.Run(Vm.ClearSearchAsync); }
+    private void EmptyAddClick(object sender, RoutedEventArgs e) => OpenMusicFolder();
+    private void ResetFiltersClick(object sender, RoutedEventArgs e) => Vm.ResetBrowseFilters();
+    private void LoadMoreClick(object sender, RoutedEventArgs e) =>
+        Vm.Run(() => Vm.HasMore ? Vm.LoadMoreAsync() : Vm.BrowseAsync(Vm.Section, Vm.BrowseQuery, Vm.BrowseItem, remember: false));
     private void OpenMusicFolder() { var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "添加音乐文件夹" }; if (dialog.ShowDialog(this) == true) Vm.Run(() => Vm.AddFolderAsync(dialog.FolderName)); }
     private void BrowseScrolled(object sender, ScrollChangedEventArgs e)
     {

@@ -15,6 +15,8 @@ public sealed partial class PlayerViewModel
     public event Action? PlaylistsChanged;
     public void NotifyPlaylists() { PlaylistsChanged?.Invoke(); if (Section == "歌单") Run(() => BrowseAsync("歌单")); }
     public string BrowseSummary => $"已加载 {Results.Count} 首 / {Library.Count} 个项目{(HasMore ? " · 还有更多" : " · 已全部加载")}";
+    public string AlbumLeadArtist => _browseItem?.Subtitle.Split('·')[0].Trim() ?? "";
+    public bool HasLocalTracks => _localTracks.Count > 0;
     public string QueueSummary => $"{Queue.Count} 首 · {DurationLabel(Queue.Sum(t => Math.Max(0, t.Duration)))}";
     public string PrioritySummary => _order.Priority.Count > 0 ? $"安排下一首：{string.Join(" → ", _order.Priority.Where(i => i >= 0 && i < Queue.Count).Take(5).Select(i => Queue[i].Title))}" : "按当前播放模式继续";
     public string AlbumDetail => _browseItem == null ? "" : Results.Count == 0 && Library.Count > 0 ? $"{Library.Count} 张专辑" : string.Join(" · ", new[] { Results.FirstOrDefault()?.Year is > 0 ? Results[0].Year.ToString() : "", Results.FirstOrDefault()?.Genre ?? "", $"{Results.Count} 首", DurationLabel(Results.Sum(t => t.Duration)) }.Where(s => s.Length > 0));

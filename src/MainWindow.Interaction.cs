@@ -51,7 +51,7 @@ public partial class MainWindow
         {
             var selected = SelectedTracks();
             foreach (var item in songs.Items.OfType<MenuItem>()) item.IsEnabled = item.Header.ToString() == "添加音乐文件夹…" || selected.Length > 0;
-            ((MenuItem)songs.Items[4]).IsEnabled = selected.Length > 0 && selected.All(t => !t.IsLocal && !t.IsNetease);
+            ((MenuItem)songs.Items[4]).Visibility = Shown(selected.Any(t => !t.IsLocal && !t.IsNetease));
         };
         queue.Opened += (_, _) =>
         {
@@ -65,7 +65,7 @@ public partial class MainWindow
         {
             var selected = LibraryList.SelectedItem as LibraryItem;
             foreach (var item in albums.Items.OfType<MenuItem>()) item.IsEnabled = selected != null;
-            ((MenuItem)albums.Items[1]).IsEnabled = selected?.Kind == "album" && !selected.Id.StartsWith("ncm:", StringComparison.Ordinal);
+            ((MenuItem)albums.Items[1]).Visibility = Shown( selected?.Kind == "album" && !selected.Id.StartsWith("ncm:", StringComparison.Ordinal));
             foreach (var item in albums.Items.OfType<MenuItem>().Skip(2)) item.IsEnabled = selected?.Kind is "album" or "playlist" or "local-album" or "local-artist" or "local-playlist";
         };
         Vm.PropertyChanged += (_, e) =>
@@ -82,7 +82,7 @@ public partial class MainWindow
             bool same = Vm.BrowseQueueMatches;
             PlayListButton.Content = same ? Vm.IsProgressMoving ? "Ⅱ  暂停" : "▶  继续播放" : "▶  播放全部";
             PlayListButton.ToolTip = same ? "控制当前列表，保留歌曲和播放位置" : "从当前列表开始播放";
-            QueueFollowButton.IsEnabled = Vm.Current != null; ClearQueueButton.IsEnabled = Vm.Queue.Count > 0;
+            QueueFollowButton.IsEnabled = Vm.Current != null;
         }
         CollectionViewSource.GetDefaultView(Vm.Results).CollectionChanged += (_, _) => RefreshActions();
         Vm.Queue.CollectionChanged += (_, _) => RefreshActions(); Vm.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(Vm.Current) or nameof(Vm.IsProgressMoving) or nameof(Vm.HasMore)) RefreshActions(); }; RefreshActions();
@@ -93,6 +93,7 @@ public partial class MainWindow
         };
         PreviewKeyDown += (_, e) =>
         {
+            if (_drawerOpen && e.Key == Key.Escape) { SetQueueOpen(false); e.Handled = true; return; }
             var key = e.Key == Key.System ? e.SystemKey : e.Key;
             if (Keyboard.Modifiers != ModifierKeys.Alt || key is not (Key.Left or Key.Right)) return;
             if (key == Key.Left) BackClick(this, new()); else ForwardClick(this, new()); e.Handled = true;

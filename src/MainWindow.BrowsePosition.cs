@@ -9,7 +9,7 @@ public partial class MainWindow
     private int _browseRestoreVersion;
     private BrowseViewport? _pendingBrowseViewport;
     private static ScrollViewer? BrowseScroll(ListBox list) => UiVerification.FindAll<ScrollViewer>(list).FirstOrDefault();
-    private ListBox VisibleSongList => Vm.Settings.DetailedTracks && _details != null ? _details : TracksList;
+    private ListBox VisibleSongList => DetailedList && _details != null ? _details : TracksList;
     private void InitializeBrowsePosition()
     {
         Vm.BrowseLeaving += () =>
@@ -23,22 +23,23 @@ public partial class MainWindow
         {
             _pendingBrowseViewport = state;
             int version = ++_browseRestoreVersion;
+            // Rows and their collection view are ready at BrowseArrived. Restore selection
+            // immediately so a quick return or a keyboard action sees the correct rows.
+            var songs = VisibleSongList;
+            songs.SelectedItems.Clear();
+            foreach (var song in state.SelectedSongs ?? [])
+                if (songs.Items.Contains(song)) songs.SelectedItems.Add(song);
+            LibraryList.SelectedItem = state.SelectedAlbum;
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
             {
                 if (version != _browseRestoreVersion) return;
-                UpdateLayout(); var songs = VisibleSongList; songs.SelectedItems.Clear();
-                foreach (var song in state.SelectedSongs ?? [])
-                    if (songs.Items.Contains(song)) songs.SelectedItems.Add(song);
-                LibraryList.SelectedItem = state.SelectedAlbum;
-                Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () =>
-                {
-                    if (version != _browseRestoreVersion) return;
-                    UpdateLayout();
-                    BrowseScroll(songs)?.ScrollToVerticalOffset(state.Songs);
-                    BrowseScroll(LibraryList)?.ScrollToVerticalOffset(state.Albums);
-                    UpdateLayout();
-                    _pendingBrowseViewport = null; _restoringBrowse = false; _coverTimer.Start();
-                });
+                UpdateLayout();
+                BrowseScroll(songs)?.ScrollToVerticalOffset(state.Songs);
+                BrowseScroll(LibraryList)?.ScrollToVerticalOffset(state.Albums);
+                UpdateLayout();
+                _pendingBrowseViewport = null;
+                _restoringBrowse = false;
+                _coverTimer.Start();
             });
         };
     }

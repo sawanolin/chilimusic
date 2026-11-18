@@ -24,6 +24,10 @@ public sealed class PlaybackSeekSlider : Slider
     {
         Style = (Style)Application.Current.Resources[typeof(Slider)]; IsMoveToPointEnabled = true;
         SetBinding(MaximumProperty, new Binding("Duration")); SetBinding(PlaybackPositionProperty, new Binding("Position")); SetBinding(PlaybackActiveProperty, new Binding("IsProgressMoving"));
+        var seekStyle = new Style(typeof(PlaybackSeekSlider), Style);
+        var noDuration = new DataTrigger { Binding = new Binding("Duration"), Value = 0d };
+        noDuration.Setters.Add(new Setter(VisibilityProperty, Visibility.Hidden));
+        seekStyle.Triggers.Add(noDuration); Style = seekStyle;
         Loaded += (_, _) => { _sampleTime = Stopwatch.GetTimestamp(); Value = PlaybackPosition; UpdateRendering(); };
         Unloaded += (_, _) => StopRendering(); IsVisibleChanged += (_, _) => UpdateRendering();
         AddHandler(Thumb.DragStartedEvent, new DragStartedEventHandler((_, _) => { _interacting = _dragging = true; _dragCommitted = false; }));

@@ -22,6 +22,13 @@ public partial class MainWindow
     private int _playlistRefresh;
     private System.Windows.Point _songDragStart;
     private readonly DispatcherTimer _layoutSave = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private GridSplitter? _queueSplitter;
+    private bool _drawerOpen;
+    private bool NarrowWindow => (ActualWidth > 0 ? ActualWidth : Width) < 1000;
+    private bool AlbumPage => Vm.BrowseItem?.Kind is "album" or "local-album";
+    private bool DetailedList => AlbumPage ? Vm.Settings.DetailedAlbumTracks : Vm.Settings.DetailedTracks;
+    private static Visibility Shown(bool visible) => visible ? Visibility.Visible : Visibility.Collapsed;
+
     private void InitializeProduct()
     {
         Width = Math.Clamp(Vm.Settings.MainWidth, MinWidth, Math.Max(MinWidth, SystemParameters.WorkArea.Width)); Height = Math.Clamp(Vm.Settings.MainHeight, MinHeight, Math.Max(MinHeight, SystemParameters.WorkArea.Height));
@@ -41,23 +48,31 @@ public partial class MainWindow
             bool compact = ActualWidth > 0 && ActualWidth < 1000;
             PlayListButton.Width = compact ? 94 : 108; ShuffleListButton.Width = compact ? 84 : 106;
             DownloadListButton.Width = compact ? 52 : 60; BrowseMoreButton.Width = compact ? 28 : 34;
-            HeroCoverBorder.Width = HeroCoverBorder.Height = artSize; HeroTextGrid.Height = detail ? Math.Max(artSize, ActualWidth < 1000 ? 142 : artSize) : double.NaN; HeroDescription.Text = Vm.BrowseItem?.Kind == "local-playlist" ? Vm.Playlists.Local.FirstOrDefault(p => p.Id == Vm.BrowseItem.Id)?.Description ?? "" : ""; HeroDescription.Visibility = HeroDescription.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+            HeroCoverBorder.Width = HeroCoverBorder.Height = artSize; HeroTextGrid.MinHeight = detail ? artSize : 0; HeroDescription.Text = Vm.BrowseItem?.Kind == "local-playlist" ? Vm.Playlists.Local.FirstOrDefault(p => p.Id == Vm.BrowseItem.Id)?.Description ?? "" : ""; HeroDescription.Visibility = HeroDescription.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
             HeroArtColumn.Width = detail ? new GridLength(artSize + 20) : new GridLength(0); HeroCoverBorder.Visibility = detail ? Visibility.Visible : Visibility.Collapsed;
-            HeroArtist.Text = detail ? Vm.BrowseItem!.Subtitle.Split('·')[0].Trim() : Vm.CatalogName;
+            HeroArtist.Text = detail ? Vm.AlbumLeadArtist : Vm.CatalogName;
             HeroArtist.Visibility = detail ? Visibility.Visible : Visibility.Collapsed;
-            HeroMeta.Text = detail ? Vm.AlbumDetail : Vm.Library.Count > 0 && Vm.Results.Count == 0 ? $"{Vm.Library.Count} 个项目" : $"{Vm.Results.Count} 首歌曲";
-            BrowseActions.Visibility = detail || Vm.Results.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            ListHeading.Text = Vm.Library.Count > 0 && Vm.Results.Count == 0 ? $"{(Vm.IsLocalCatalog ? Vm.LocalView : Vm.Navigation)} · {Vm.Library.Count}" : $"歌曲 · {Vm.Results.Count}";
+            bool cardPage = !detail && !Vm.IsSearch && LibraryList.Items.Count > 0 && TracksList.Items.Count == 0;
+            string group = Vm.Section == "本地音乐" ? Vm.LocalView : Vm.Section;
+            PageHeading.Text = cardPage ? $"{group} · {LibraryList.Items.Count}" : Vm.Section;
+            HeroMeta.Visibility = Shown(detail);
+            HeroMeta.Text = detail ? Vm.AlbumDetail : "";
+            BrowseActions.Visibility = Shown(detail || TracksList.Items.Count > 0);
+            DownloadListButton.Visibility = Shown(TracksList.Items.Cast<Track>().Any(t => !t.IsLocal && !t.IsNetease));
+            ListHeading.Text = detail && AlbumPage ? "曲目" : $"歌曲 · {TracksList.Items.Count}";
+            ListHeading.Visibility = Shown(!cardPage && TracksList.Items.Count > 0);
+            AlbumHero.Margin = new Thickness(0, 0, 0, compact ? 10 : 16);
+            UpdateSongView();
             bool artist = Vm.BrowseItem?.Kind is "artist" or "local-artist";
             HeroCover.Clip = artist ? new EllipseGeometry(new Point(artSize / 2, artSize / 2), artSize / 2, artSize / 2) : null;
             HeroCoverBorder.CornerRadius = new CornerRadius(artist ? artSize / 2 : 0);
             BreadcrumbText.Text = detail ? Vm.CatalogName + "  ›  " + (Vm.Navigation == Vm.CatalogName ? "专辑" : Vm.Navigation) + "  ›  " + Vm.Section : Vm.CatalogName == Vm.Section ? Vm.CatalogName : Vm.CatalogName + "  ›  " + Vm.Section;
             PageHeading.FontSize = detail ? (compact ? 28 : 36) : 30;
             RefreshDetailCover();
-            LocalViewBox.Visibility = !detail && Vm.Section != "所有歌曲" && (Vm.IsLocalCatalog || Vm.Navigation == "本地音乐") ? Visibility.Visible : Visibility.Collapsed;
+            LocalViewBox.Visibility = !detail && !Vm.IsSearch && Vm.Section != "所有歌曲" && (Vm.IsLocalCatalog || Vm.Navigation == "本地音乐") ? Visibility.Visible : Visibility.Collapsed;
         }
         Vm.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(Vm.Section) or nameof(Vm.BrowseSummary) or nameof(Vm.CatalogSource) or nameof(Vm.AlbumDetail)) DetailChanged(); }; DetailChanged();
-        SizeChanged += (_, _) => DetailChanged();
+        SizeChanged += (_, _) => { DetailChanged(); ApplyQueueLayout(); };
         IsVisibleChanged += (_, _) => { if (IsVisible) RefreshDetailCover(); else CancelDetailCover(); };
         Closed += (_, _) => CancelDetailCover();
         _details = new ListView { ItemsSource = Vm.Results, Background = Brushes.Transparent, SelectionMode = SelectionMode.Extended, Visibility = Visibility.Collapsed };
@@ -97,7 +112,7 @@ public partial class MainWindow
         var queueSearch = _queueSearch = UiFactory.Input(); queueSearch.Height = 32; queueSearch.ToolTip = "搜索播放队列"; System.Windows.Automation.AutomationProperties.SetHelpText(queueSearch, "搜索播放队列中的歌曲"); queueSearch.TextChanged += (_, _) => CollectionViewSource.GetDefaultView(Vm.Queue).Filter = row => row is Track t && SearchText.Matches(t.Title + " " + t.Artist, queueSearch.Text); DockPanel.SetDock(queueSearch, Dock.Top); var searchField = UiFactory.SearchField(queueSearch, "搜索队列中的歌曲"); DockPanel.SetDock(searchField, Dock.Top); queueDock.Children.Insert(1, searchField);
         var priority = UiFactory.Text("", 10); priority.TextTrimming = TextTrimming.CharacterEllipsis; priority.MaxHeight = 34; priority.SetBinding(TextBlock.TextProperty, new Binding(nameof(Vm.PrioritySummary))); DockPanel.SetDock(priority, Dock.Bottom); QueueBorder.ToolTip = priority;
         AddItem(QueueList.ContextMenu, "批量移除选中", () => Vm.RemoveRange(SelectedQueueIndices()));
-        var resize = new GridSplitter { Width = 5, Background = Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Stretch, ResizeDirection = GridResizeDirection.Columns, ResizeBehavior = GridResizeBehavior.PreviousAndCurrent }; Grid.SetColumn(resize, 2); ((Grid)QueueBorder.Parent).Children.Add(resize); resize.DragCompleted += (_, _) => { Vm.Settings.QueueWidth = QueueColumn.ActualWidth; ScheduleLayoutSave(); };
+        var resize = _queueSplitter = new GridSplitter { Width = 5, Background = Brushes.Transparent, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Stretch, ResizeDirection = GridResizeDirection.Columns, ResizeBehavior = GridResizeBehavior.PreviousAndCurrent }; Panel.SetZIndex(resize, 3); Grid.SetColumn(resize, 2); ((Grid)QueueBorder.Parent).Children.Add(resize); resize.DragCompleted += (_, _) => { Vm.Settings.QueueWidth = QueueColumn.ActualWidth; ScheduleLayoutSave(); };
         _sidebarPlaylists = new ListBox { MaxHeight = 170, MinHeight = 30, Background = Brushes.Transparent, ToolTip = "拖入歌曲加入本地歌单", AllowDrop = true };
         _sidebarPlaylists.ItemTemplate = (DataTemplate)Resources["SidebarPlaylistTemplate"];
         _sidebarPlaylists.MouseDoubleClick += (_, _) => { if (_sidebarPlaylists.SelectedItem is LibraryItem playlist) Vm.Run(() => Vm.BrowseAsync(playlist.Title, item: playlist)); };
@@ -109,26 +124,64 @@ public partial class MainWindow
         _details.PreviewMouseRightButtonDown += SelectRightClick;
         _details.PreviewMouseLeftButtonDown += (_, e) => _songDragStart = e.GetPosition(_details);
         _details.PreviewMouseMove += (_, e) => { if (e.LeftButton == MouseButtonState.Pressed && Math.Abs(e.GetPosition(_details).Y - _songDragStart.Y) > 10 && SelectedTracks().Length > 0) System.Windows.DragDrop.DoDragDrop(_details, new DataObject("PlaylistTracks", SelectedTracks()), DragDropEffects.Copy); };
-        var emptyActions = UiFactory.Buttons(UiFactory.Button("添加目录", OpenMusicFolder), UiFactory.Button("连接 Navidrome", () => Host.ShowSettings()), UiFactory.Button("登录网易云", Host.ShowNetease), UiFactory.Button("重新加载", () => Vm.Run(() => Vm.BrowseAsync(Vm.Section, Vm.BrowseQuery, Vm.BrowseItem)))); emptyActions.HorizontalAlignment = HorizontalAlignment.Center; EmptyPanel.Children.Add(emptyActions);
         var failure = new StackPanel { Orientation = Orientation.Horizontal }; var retry = UiFactory.Button("重试播放", () => Vm.Run(Vm.RetryPlaybackAsync)); var skip = UiFactory.Button("跳过此曲", () => Vm.Run(() => Vm.NextAsync(false))); failure.Children.Add(retry); failure.Children.Add(skip); ((StackPanel)AlbumHero.Parent).Children.Add(failure);
         Vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Vm.PlaybackFailure)) failure.Visibility = Vm.PlaybackFailure.Length > 0 ? Visibility.Visible : Visibility.Collapsed; }; failure.Visibility = Visibility.Collapsed;
         _layoutSave.Tick += (_, _) => { _layoutSave.Stop(); SaveProductLayout(); };
         SizeChanged += (_, _) => ScheduleLayoutSave(); Closing += (_, _) => { SaveProductLayout(); _layoutSave.Stop(); Vm.PlaylistsChanged -= RefreshSidebarPlaylists; };
+        Vm.Queue.CollectionChanged += (_, _) => ApplyQueueLayout();
         ApplyListMode(); ApplyQueueLayout(); RefreshSidebarPlaylists();
         Vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(Vm.CatalogSource)) RefreshSidebarPlaylists(); };
         Loaded += (_, _) => NameAccessibleControls(this);
     }
+    private void UpdateSongView()
+    {
+        if (_details == null) return;
+        bool songs = TracksList.Items.Count > 0;
+        TracksList.Visibility = Shown(songs && !DetailedList);
+        _details.Visibility = Shown(songs && DetailedList);
+        TracksList.ItemTemplate = (DataTemplate)FindResource(AlbumPage ? "AlbumSong" : "TrackTemplate");
+    }
     private void ApplyListMode()
     {
-        if (_details == null) return; TracksList.Visibility = Vm.Settings.DetailedTracks ? Visibility.Collapsed : Visibility.Visible; _details.Visibility = Vm.Settings.DetailedTracks ? Visibility.Visible : Visibility.Collapsed;
+        if (_details == null) return;
+        UpdateSongView();
         var style = new Style(typeof(ListBoxItem), (Style)Application.Current.FindResource(typeof(ListBoxItem))); style.Setters.Add(new Setter(PaddingProperty, new Thickness(5, Vm.Settings.CompactTracks ? 3 : 7, 5, Vm.Settings.CompactTracks ? 3 : 7))); TracksList.ItemContainerStyle = style;
         var row = new FrameworkElementFactory(typeof(Border), "Row"); row.SetValue(Border.CornerRadiusProperty, new CornerRadius(0)); row.SetValue(Border.PaddingProperty, new TemplateBindingExtension(PaddingProperty)); row.SetValue(Border.BackgroundProperty, Brushes.Transparent); row.SetValue(Border.BorderThicknessProperty, new Thickness(0, 0, 0, 1)); row.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
         var cells = new FrameworkElementFactory(typeof(GridViewRowPresenter)); cells.SetBinding(GridViewRowPresenter.ContentProperty, new Binding("Content") { RelativeSource = RelativeSource.TemplatedParent }); cells.SetBinding(GridViewRowPresenter.ColumnsProperty, new Binding("View.Columns") { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(ListView), 1) }); row.AppendChild(cells);
         var template = new ControlTemplate(typeof(ListViewItem)) { VisualTree = row }; var hover = new Trigger { Property = IsMouseOverProperty, Value = true }; hover.Setters.Add(new Setter(Border.BackgroundProperty, new DynamicResourceExtension("HoverBrush"), "Row")); template.Triggers.Add(hover); var selected = new Trigger { Property = ListBoxItem.IsSelectedProperty, Value = true }; selected.Setters.Add(new Setter(Border.BackgroundProperty, new DynamicResourceExtension("SelectedBrush"), "Row")); template.Triggers.Add(selected);
-        var currentBinding = new MultiBinding { Converter = new CurrentTrackConverter() }; currentBinding.Bindings.Add(new Binding()); currentBinding.Bindings.Add(new Binding("DataContext.Current") { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(ListView), 1) }); var current = new DataTrigger { Binding = currentBinding, Value = true }; current.Setters.Add(new Setter(ForegroundProperty, new DynamicResourceExtension("AccentBrush"))); current.Setters.Add(new Setter(Border.BackgroundProperty, new DynamicResourceExtension("SelectedBrush"), "Row")); template.Triggers.Add(current);
+        var currentBinding = new MultiBinding { Converter = new CurrentTrackConverter() }; currentBinding.Bindings.Add(new Binding()); currentBinding.Bindings.Add(new Binding("DataContext.Current") { RelativeSource = new RelativeSource(RelativeSourceMode.FindAncestor, typeof(ListView), 1) }); var current = new DataTrigger { Binding = currentBinding, Value = true }; current.Setters.Add(new Setter(ForegroundProperty, new DynamicResourceExtension("AccentBrush"))); template.Triggers.Add(current);
         var detailedStyle = new Style(typeof(ListViewItem)); detailedStyle.Setters.Add(new Setter(TemplateProperty, template)); detailedStyle.Setters.Add(new Setter(PaddingProperty, new Thickness(0, Vm.Settings.CompactTracks ? 7 : 12, 0, Vm.Settings.CompactTracks ? 7 : 12))); detailedStyle.Setters.Add(new Setter(HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch)); detailedStyle.Setters.Add(new Setter(ForegroundProperty, new DynamicResourceExtension("TextBrush"))); _details.ItemContainerStyle = detailedStyle;
     }
-    private void ApplyQueueLayout() { QueueColumn.Width = Vm.Settings.QueueVisible ? new GridLength(Math.Clamp(Vm.Settings.QueueWidth, 200, 420)) : new GridLength(0); QueueBorder.Visibility = Vm.Settings.QueueVisible ? Visibility.Visible : Visibility.Collapsed; }
+    private void ApplyQueueLayout()
+    {
+        bool drawer = NarrowWindow;
+        if (!drawer) _drawerOpen = false;
+        bool visible = drawer ? _drawerOpen : Vm.Settings.QueueVisible && (Vm.Queue.Count > 0 || Vm.Settings.QueuePinned);
+        double width = Math.Clamp(Vm.Settings.QueueWidth, 200, 420);
+        QueueColumn.Width = new GridLength(visible && !drawer ? width : 0);
+        Grid.SetColumn(QueueBorder, drawer ? 1 : 2);
+        QueueBorder.Width = drawer ? width : double.NaN;
+        QueueBorder.HorizontalAlignment = drawer ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
+        QueueBorder.Visibility = Shown(visible);
+        QueueDismissArea.Visibility = Shown(drawer && visible);
+        if (_queueSplitter != null) _queueSplitter.Visibility = Shown(visible && !drawer);
+        QueueToggle.ToolTip = visible ? "收起播放队列" : "展开播放队列";
+        AutomationProperties.SetName(QueueToggle, $"{QueueToggle.ToolTip} · {Vm.Queue.Count} 首");
+        QueueToggle.SetResourceReference(BackgroundProperty, visible ? "SelectedBrush" : "SurfaceBrush");
+    }
+    private void SetQueueOpen(bool open)
+    {
+        if (NarrowWindow) _drawerOpen = open;
+        else
+        {
+            Vm.Settings.QueuePinned = Vm.Settings.QueueVisible = open;
+            Vm.SaveSettings();
+        }
+        ApplyQueueLayout();
+        if (!open) QueueToggle.Focus();
+    }
+    private void ToggleQueueClick(object sender, RoutedEventArgs e) => SetQueueOpen(QueueBorder.Visibility != Visibility.Visible);
+    private void DismissQueue(object sender, MouseButtonEventArgs e) { SetQueueOpen(false); e.Handled = true; }
     private void ScheduleLayoutSave() { _layoutSave.Stop(); _layoutSave.Start(); }
     private void SaveProductLayout()
     {
@@ -146,7 +199,16 @@ public partial class MainWindow
     private void ShowSearchHistory() { var menu = new ContextMenu(); foreach (var query in Vm.SearchHistory.ToArray()) AddItem(menu, query, () => { SearchBox.Text = query; }); AddItem(menu, "清空搜索记录", Vm.ClearSearchHistory); menu.PlacementTarget = SearchBox; menu.IsOpen = true; }
     private void ViewMenuClick(object sender, RoutedEventArgs e)
     {
-        var menu = new ContextMenu(); AddItem(menu, Vm.Settings.DetailedTracks ? "切换简洁列表" : "切换详细列表", () => { Vm.Settings.DetailedTracks = !Vm.Settings.DetailedTracks; ApplyListMode(); Vm.SaveSettings(); }); AddItem(menu, Vm.Settings.CompactTracks ? "标准行高" : "紧凑行高", () => { Vm.Settings.CompactTracks = !Vm.Settings.CompactTracks; ApplyListMode(); Vm.SaveSettings(); }); AddItem(menu, Vm.Settings.QueueVisible ? "收起队列" : "展开队列", () => { Vm.Settings.QueueVisible = !Vm.Settings.QueueVisible; ApplyQueueLayout(); Vm.SaveSettings(); }); menu.PlacementTarget = sender as UIElement; menu.IsOpen = true;
+        var menu = new ContextMenu();
+        AddItem(menu, DetailedList ? "切换简洁列表" : "切换详细列表", () =>
+        {
+            if (AlbumPage) Vm.Settings.DetailedAlbumTracks = !DetailedList;
+            else Vm.Settings.DetailedTracks = !DetailedList;
+            ApplyListMode(); Vm.SaveSettings();
+        });
+        AddItem(menu, Vm.Settings.CompactTracks ? "标准行高" : "紧凑行高", () => { Vm.Settings.CompactTracks = !Vm.Settings.CompactTracks; ApplyListMode(); Vm.SaveSettings(); });
+        AddItem(menu, QueueBorder.IsVisible ? "收起队列" : "展开队列", () => SetQueueOpen(!QueueBorder.IsVisible));
+        menu.PlacementTarget = sender as UIElement; menu.IsOpen = true;
     }
     private void BrowseMoreClick(object sender, RoutedEventArgs e)
     {
@@ -154,10 +216,21 @@ public partial class MainWindow
     }
     private void QueueMoreClick(object sender, RoutedEventArgs e)
     {
-        var menu = new ContextMenu(); AddItem(menu, "撤销上次队列修改", () => Vm.Run(Vm.UndoQueueAsync)); ((MenuItem)menu.Items[0]).IsEnabled = Vm.CanUndoQueue; AddItem(menu, "保存到歌单…", () => Host.ShowTools("歌单", Vm.Queue.ToArray())); AddItem(menu, "移除选中歌曲", () => Vm.RemoveRange(SelectedQueueIndices())); AddItem(menu, "清空队列", Vm.ClearQueue); menu.PlacementTarget = sender as UIElement; menu.IsOpen = true;
+        var menu = new ContextMenu();
+        AddItem(menu, "撤销上次队列修改", () => Vm.Run(Vm.UndoQueueAsync)); ((MenuItem)menu.Items[0]).IsEnabled = Vm.CanUndoQueue;
+        AddItem(menu, "保存到歌单…", () => Host.ShowTools("歌单", Vm.Queue.ToArray())); ((MenuItem)menu.Items[1]).IsEnabled = Vm.Queue.Count > 0;
+        AddItem(menu, "移除选中歌曲", () => Vm.RemoveRange(SelectedQueueIndices())); ((MenuItem)menu.Items[2]).IsEnabled = QueueList.SelectedItems.Count > 0;
+        AddItem(menu, "清空队列", Vm.ClearQueue); ((MenuItem)menu.Items[3]).IsEnabled = Vm.Queue.Count > 0;
+        if (!NarrowWindow)
+        {
+            var pin = new MenuItem { Header = "固定队列侧栏", IsCheckable = true, IsChecked = Vm.Settings.QueuePinned };
+            pin.Click += (_, _) => { Vm.Settings.QueuePinned = pin.IsChecked; ApplyQueueLayout(); Vm.SaveSettings(); };
+            menu.Items.Add(pin);
+        }
+        menu.PlacementTarget = sender as UIElement; menu.IsOpen = true;
     }
     private void ShuffleBrowseClick(object sender, RoutedEventArgs e) => Vm.Run(async () => { await Vm.PlayCompleteBrowseAsync(); var tracks = Vm.Queue.ToArray(); if (tracks.Length == 0) return; Vm.Settings.Mode = PlayMode.Shuffle; Vm.Changed(nameof(Vm.ModeText)); Vm.Changed(nameof(Vm.ModeIcon)); await Vm.PlayAsync(Random.Shared.Next(tracks.Length)); Vm.SaveSettings(); });
-    private void AlbumDownloadClick(object sender, RoutedEventArgs e) => Vm.Run(async () => { var tracks = Vm.Results.Where(t => !t.IsLocal && !t.IsNetease).ToArray(); if (tracks.Length == 0) { Vm.Status = "此列表没有可下载的 Navidrome 歌曲"; return; } Host.ShowTools("离线"); await Vm.DownloadSelectionAsync(tracks); });
+    private void AlbumDownloadClick(object sender, RoutedEventArgs e) => Vm.Run(async () => { var tracks = TracksList.Items.Cast<Track>().Where(t => !t.IsLocal && !t.IsNetease).ToArray(); if (tracks.Length == 0) { Vm.Status = "此列表没有可下载的 Navidrome 歌曲"; return; } Host.ShowTools("离线"); await Vm.DownloadSelectionAsync(tracks); });
     private void ShowLibraryTools()
     {
         var menu = new ContextMenu(); AddItem(menu, "重新扫描", () => Vm.Run(Vm.LocalLibrary.ScanAsync)); AddItem(menu, "查找重复文件", () => Vm.Run(async () => { var duplicates = await Vm.LocalLibrary.FindDuplicatesAsync(); new TextReportWindow("重复文件", duplicates.Count == 0 ? "没有发现内容完全相同的文件。" : string.Join("\n\n", duplicates.Select(g => string.Join("\n", g)))) { Owner = this }.Show(); })); AddItem(menu, "查看听歌历史（按日期）", () => new ListeningHistoryWindow(Vm) { Owner = this }.Show()); AddItem(menu, "清除本机听歌历史", Vm.ClearListeningHistory); menu.IsOpen = true;

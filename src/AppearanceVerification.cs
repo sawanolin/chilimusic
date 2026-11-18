@@ -59,9 +59,14 @@ internal static class AppearanceVerification
                 var musician = vm.Library.First(); await vm.BrowseAsync(musician.Title, item: musician); await Capture(main, "artist-detail-" + theme);
                 await vm.BrowseAsync("搜索", "夜"); await Capture(main, "search-" + theme);
                 await vm.BrowseAsync("搜索", "__no_result__"); await Capture(main, "empty-" + theme);
+                Check(main.EmptyClear.IsVisible && !main.EmptyAdd.IsVisible && !main.EmptyReset.IsVisible, theme + " 无搜索结果只提供清除搜索");
+                vm.FormatFilter = "FLAC"; main.UpdateLayout();
+                Check(main.EmptyReset.IsVisible, theme + " 有筛选时可重置");
+                main.EmptyReset.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Check(vm.FormatFilter == "全部格式" && !main.EmptyReset.IsVisible, theme + " 重置后保留搜索并更新按钮");
                 vm.Settings.LocalView = "专辑"; vm.Changed(nameof(vm.LocalView)); await vm.BrowseAsync(album.Title, item: album);
                 await Capture(main, "detail-" + theme);
-                var details = (ListView)typeof(MainWindow).GetField("_details", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(main)!; details.SelectedIndex = 0;
+                var details = (ListView)typeof(MainWindow).GetField("_details", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(main)!; if (details.IsVisible) details.SelectedIndex = 0; else main.TracksList.SelectedIndex = 0;
                 var songs = (ListBox)main.FindName("TracksList"); var menu = songs.ContextMenu!; menu.PlacementTarget = songs; menu.IsOpen = true;
                 await Capture(menu, "menu-" + theme); menu.IsOpen = false;
                 ((Button)main.FindName("PlayListButton")).Focus(); await Capture(main, "focus-" + theme);
@@ -70,6 +75,15 @@ internal static class AppearanceVerification
                 main.Width = 900; main.Height = 610; await Capture(main, "small-" + theme);
                 var more = (Button)main.FindName("BrowseMoreButton"); var hero = (Grid)main.FindName("HeroTextGrid");
                 Check(more.TranslatePoint(new Point(more.ActualWidth, 0), hero).X <= hero.ActualWidth + 1, theme + " 最小窗口操作组可见");
+                var end = more.TranslatePoint(new Point(more.ActualWidth, more.ActualHeight), hero);
+                Check(end.Y <= hero.ActualHeight + 1, theme + " 操作按钮下沿完整");
+                Check(!main.DownloadListButton.IsVisible && main.TracksList.IsVisible, theme + " 本地专辑显示精简曲目和适用操作");
+                Check(main.QueueColumn.ActualWidth == 0 && !main.QueueBorder.IsVisible, theme + " 窄窗口队列默认收起");
+                double listWidth = songs.ActualWidth;
+                main.QueueToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); main.UpdateLayout();
+                Check(main.QueueBorder.IsVisible && Math.Abs(listWidth - songs.ActualWidth) < 1, theme + " 队列抽屉不挤压曲目");
+                await Capture(main, "drawer-" + theme);
+                main.QueueToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 main.Width = 1200; main.Height = 800;
                 var settings = new SettingsWindow(vm) { Owner = main }; settings.Show();
                 var themes = (ComboBox)settings.FindName("ThemeBox"); themes.IsDropDownOpen = true; await Task.Delay(80);
@@ -82,6 +96,15 @@ internal static class AppearanceVerification
                 Check(vm.LyricLines.Count == 12, theme + " 歌词截图包含完整歌词"); immersive.Lyrics.Center(); await Task.Delay(450); await Capture(immersive, "lyrics-" + theme); immersive.Close();
             }
             await InteractionVerification.RunAsync(app, main);
+            vm.ClearQueue(); main.UpdateLayout();
+            Check(!main.QueueBorder.IsVisible, "空队列默认收起");
+            main.QueueToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); main.UpdateLayout();
+            Check(main.QueueBorder.IsVisible && vm.Settings.QueuePinned, "宽窗口可固定空队列");
+            main.QueueToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            app.ShowMini(); var idle = Application.Current.Windows.OfType<MiniPlayerWindow>().First();
+            await Capture(idle, "mini-idle");
+            Check(idle.ChooseMusic.IsVisible && !idle.MiniTransport.ControlRow.IsVisible && !idle.MiniTransport.SeekSlider.IsVisible, "迷你空闲状态只显示选曲入口和空进度轨");
+            idle.Hide();
             Theme.Apply("sonora_dark");
             Check(Theme.Contrast(((SolidColorBrush)Application.Current.Resources["AccentFillBrush"]).Color, ((SolidColorBrush)Application.Current.Resources["AccentForegroundBrush"]).Color) >= 4.5, "主按钮文字对比度");
             Store.Write("appearance-report.json", new { Result = "PASS", Passed = passed, Screenshots = Directory.GetFiles(Store.Root, "*.png").Length });

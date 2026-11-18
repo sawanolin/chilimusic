@@ -3,11 +3,16 @@ using System.Windows.Interop;
 namespace ChiliMusic;
 public partial class MiniPlayerWindow : Window
 {
-    private void ImmersiveClick(object sender, System.Windows.Input.MouseButtonEventArgs e) { e.Handled = true; Host.ShowImmersive(); }
+    private void ImmersiveClick(object sender, System.Windows.Input.MouseButtonEventArgs e) { e.Handled = true; if (Host.Vm.Current == null) ChooseMusicClick(this, new()); else Host.ShowImmersive(); }
     private App Host => (App)Application.Current;
     public MiniPlayerWindow(PlayerViewModel vm)
     {
-        InitializeComponent(); WindowAppearance.Attach(this); DataContext = vm; AllowDrop = true; DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop) ? System.Windows.DragDropEffects.Copy : System.Windows.DragDropEffects.None; e.Handled = true; }; Drop += (_, e) => { if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) { var files = (string[])e.Data.GetData(System.Windows.DataFormats.FileDrop); vm.Run(() => vm.OpenLocalFilesAsync(files)); e.Handled = true; } }; Deactivated += (_, _) => Hide(); Closing += (_, e) => { if (!Host.Exiting) { e.Cancel = true; Hide(); } };
+        InitializeComponent(); WindowAppearance.Attach(this); DataContext = vm; MiniTransport.ControlRow.Style = (Style)FindResource("WhenTrackSelected"); AllowDrop = true; DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop) ? System.Windows.DragDropEffects.Copy : System.Windows.DragDropEffects.None; e.Handled = true; }; Drop += (_, e) => { if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)) { var files = (string[])e.Data.GetData(System.Windows.DataFormats.FileDrop); vm.Run(() => vm.OpenLocalFilesAsync(files)); e.Handled = true; } }; Deactivated += (_, _) => Hide(); Closing += (_, e) => { if (!Host.Exiting) { e.Cancel = true; Hide(); } };
+    }
+    private void ChooseMusicClick(object sender, RoutedEventArgs e)
+    {
+        Host.ShowMain();
+        Application.Current.Windows.OfType<MainWindow>().First().OpenLocalFiles();
     }
     public void Popup()
     {

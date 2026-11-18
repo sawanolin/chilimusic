@@ -60,10 +60,10 @@ internal static class ProductVerification
             var detailedScroll = UiVerification.FindAll<ScrollViewer>(detailedList).First(); double detailedOffset = detailedScroll.VerticalOffset;
             if (detailedOffset <= 0) { UiVerification.Capture(main, Path.Combine(Store.Root, "detailed-scroll-failure.png")); Store.Write("detailed-scroll-failure.json", new { detailedList.IsVisible, detailedList.ActualHeight, detailedList.Items.Count, Selected = detailedList.SelectedIndex, Scrolls = UiVerification.FindAll<ScrollViewer>(detailedList).Select(s => new { s.Name, s.ExtentHeight, s.ViewportHeight, s.VerticalOffset }).ToArray() }); }
             Check(detailedOffset > 0, "Detailed list did not scroll");
-            await vm.BrowseAsync("收藏"); await vm.GoBackAsync(); await Task.Delay(140); main.UpdateLayout();
-            Check(ReferenceEquals(detailedList.SelectedItem, selectedTrack) && Math.Abs(detailedScroll.VerticalOffset - detailedOffset) < 1, "Detailed list lost selection or scroll on back");
-            await vm.BrowseAsync("收藏"); await vm.GoBackAsync(); await vm.BrowseAsync("本机历史"); await vm.GoBackAsync(); await Task.Delay(140); main.UpdateLayout();
-            Check(ReferenceEquals(detailedList.SelectedItem, selectedTrack) && Math.Abs(detailedScroll.VerticalOffset - detailedOffset) < 1, "Rapid navigation captured a partially restored viewport");
+            await vm.BrowseAsync("收藏"); await vm.GoBackAsync(); await main.Dispatcher.InvokeAsync(main.UpdateLayout, System.Windows.Threading.DispatcherPriority.ContextIdle);
+            Check(ReferenceEquals(detailedList.SelectedItem, selectedTrack) && Math.Abs(detailedScroll.VerticalOffset - detailedOffset) < 1, $"Detailed list lost selection or scroll on back: selected={detailedList.SelectedIndex}, offset={detailedScroll.VerticalOffset}, expected={detailedOffset}, items={detailedList.Items.Count}");
+            await vm.BrowseAsync("收藏"); await vm.GoBackAsync(); await vm.BrowseAsync("本机历史"); await vm.GoBackAsync(); await main.Dispatcher.InvokeAsync(main.UpdateLayout, System.Windows.Threading.DispatcherPriority.ContextIdle);
+            Check(ReferenceEquals(detailedList.SelectedItem, selectedTrack) && Math.Abs(detailedScroll.VerticalOffset - detailedOffset) < 1, $"Rapid navigation captured a partially restored viewport: selected={detailedList.SelectedIndex}, offset={detailedScroll.VerticalOffset}, expected={detailedOffset}");
             var queueList = (ListBox)main.FindName("QueueList"); var queueSearch = (TextBox)typeof(MainWindow).GetField("_queueSearch", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(main)!;
             await vm.SetMobileOutputAsync(true); vm.ReplaceQueue(local.Take(5)); await vm.PlayAsync(4); queueSearch.Text = "夜航 1";
             ((Button)main.FindName("QueueFollowButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Check(queueSearch.Text == "" && queueList.SelectedIndex == 4, "Locate current track failed through queue search");
@@ -79,9 +79,14 @@ internal static class ProductVerification
                     main.Width = size.Item1; main.Height = size.Item2; await Task.Delay(60); main.UpdateLayout();
                     if (size.Item1 == 900)
                     {
+                        // Exercise custom columns that exceed the viewport even with the queue folded away.
+                        var titleColumn = ((GridView)detailedList.View).Columns.Single(c => ((GridViewColumnHeader)c.Header).Content.ToString() == "歌曲");
+                        double savedWidth = titleColumn.Width;
+                        titleColumn.Width = detailedList.ActualWidth;
+                        main.UpdateLayout();
                         var horizontal = UiVerification.FindAll<System.Windows.Controls.Primitives.ScrollBar>(detailedList).First(s => s.IsVisible && s.Orientation == Orientation.Horizontal);
                         Check(horizontal.ActualWidth > 100 && horizontal.ActualHeight <= 10, $"Horizontal scrollbar has vertical dimensions: {horizontal.ActualWidth}x{horizontal.ActualHeight}, width={horizontal.Width}, height={horizontal.Height}");
-                        detailedScroll.ScrollToRightEnd(); main.UpdateLayout(); await Task.Delay(30); Check(detailedScroll.HorizontalOffset > 0, "Detailed columns cannot scroll horizontally"); detailedScroll.ScrollToLeftEnd(); main.UpdateLayout();
+                        detailedScroll.ScrollToRightEnd(); main.UpdateLayout(); await Task.Delay(30); Check(detailedScroll.HorizontalOffset > 0, "Detailed columns cannot scroll horizontally"); detailedScroll.ScrollToLeftEnd(); titleColumn.Width = savedWidth; main.UpdateLayout();
                     }
                     Check(UiVerification.FindAll<Button>(main).Where(b => b.IsVisible).All(b => b.ActualHeight >= 20), "Button target too small");
                     foreach (var input in UiVerification.FindAll<TextBox>(main).Where(b => b.IsVisible && b.ActualWidth > 0)) Check(input.ActualHeight >= 22, "Main input clipped");
@@ -110,11 +115,13 @@ internal static class ProductVerification
                 var settingsWindow = new SettingsWindow(vm) { Owner = main }; settingsWindow.Show(); settingsWindow.SelectPage(2); await Task.Delay(100); UiVerification.Capture(settingsWindow, Path.Combine(Store.Root, "reference-settings-" + theme + ".png")); settingsWindow.Close();
             }
             Passed("所有主题与两种主窗口尺寸渲染、新设置窗口浅深色检查");
-            await Task.Delay(100); main.UpdateLayout(); details.SelectedItem = vm.Results[37]; details.ScrollIntoView(details.SelectedItem); details.UpdateLayout(); await Task.Delay(100);
-            string selectedId = ((Track)details.SelectedItem).Id; double beforeRefresh = UiVerification.FindAll<ScrollViewer>(details).First().VerticalOffset;
+            var albumSongs = main.TracksList;
+            Check(albumSongs.IsVisible, "Album track list is not visible");
+            await Task.Delay(100); main.UpdateLayout(); albumSongs.SelectedItem = vm.Results[37]; albumSongs.ScrollIntoView(albumSongs.SelectedItem); albumSongs.UpdateLayout(); await Task.Delay(100);
+            string selectedId = ((Track)albumSongs.SelectedItem).Id; double beforeRefresh = UiVerification.FindAll<ScrollViewer>(albumSongs).First().VerticalOffset;
             var updated = JsonSerializer.Deserialize<List<Track>>(JsonSerializer.Serialize(local))!; updated[0].Title = "更新后的曲目";
             var libraryUpdate = typeof(PlayerViewModel).GetMethod("OnLocalLibraryUpdated", BindingFlags.Instance | BindingFlags.NonPublic)!; libraryUpdate.Invoke(vm, [updated]); await Task.Delay(180); main.UpdateLayout();
-            Check(vm.BrowseItem?.Kind == "local-album" && ((Track?)details.SelectedItem)?.Id == selectedId && Math.Abs(UiVerification.FindAll<ScrollViewer>(details).First().VerticalOffset - beforeRefresh) < 1 && vm.Results.Any(t => t.Title == "更新后的曲目"), "Local metadata update lost detail viewport");
+            Check(vm.BrowseItem?.Kind == "local-album" && ((Track?)albumSongs.SelectedItem)?.Id == selectedId && Math.Abs(UiVerification.FindAll<ScrollViewer>(albumSongs).First().VerticalOffset - beforeRefresh) < 1 && vm.Results.Any(t => t.Title == "更新后的曲目"), "Local metadata update lost detail viewport");
             foreach (var track in updated.Take(70)) track.Album = "更新后的专辑"; libraryUpdate.Invoke(vm, [updated]); await Task.Delay(180);
             Check(vm.Section == "更新后的专辑" && vm.Results.Count == 70, "Album rename lost current detail"); Passed("本地标签更新与专辑改名保留详情、选中项和滚动位置");
             await CoverVerification.RunAsync(app, main); Passed("服务器详情封面主动加载、回退、缓存、切换防串图及返回显示");

@@ -13,7 +13,7 @@ public sealed class TrackArtwork : Border
     private readonly TextBlock _fallback = new() { Text = "♪", FontSize = 17, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
     public TrackArtwork()
     {
-        CornerRadius = new CornerRadius(4); Child = _fallback;
+        Child = _fallback;
         _fallback.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); SetResourceReference(BackgroundProperty, "SubtleBrush");
         Loaded += (_, _) => Refresh();
         Unloaded += (_, _) => { Cancel(); SetResourceReference(BackgroundProperty, "SubtleBrush"); _fallback.Visibility = Visibility.Visible; };

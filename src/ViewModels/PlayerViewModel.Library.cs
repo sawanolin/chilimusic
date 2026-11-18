@@ -27,6 +27,9 @@ public sealed partial class PlayerViewModel
     private string _formatFilter = "全部格式", _artistFilter = "", _albumFilter = "";
     private string _searchCategory = "全部";
     private int _coverViewportGeneration;
+    private bool _browseFailed;
+    public bool BrowseFailed { get => _browseFailed; private set { _browseFailed = value; Changed(); } }
+    public void ResetBrowseFilters() => RestoreFilters("全部格式", "", "", "全部");
     public bool HasMore { get => _hasMore; private set { _hasMore = value; Changed(); } }
     public bool IsBrowsing { get => _browsing; private set { _browsing = value; Changed(); } }
     public string FormatFilter { get => _formatFilter; set { if (_formatFilter == value) return; _formatFilter = value; ApplyResultFilter(); Changed(); } }
@@ -59,12 +62,13 @@ public sealed partial class PlayerViewModel
         if (remember && section == "搜索" && Section != "搜索") _beforeSearch = current;
         foreach (var album in Library) album.Cover = null;
         _browseCts.Cancel(); _browseCts.Dispose(); _browseCts = new(); int generation = ++_browseGeneration;
-        _browseItem = item; _browseQuery = query; _songOffset = _albumOffset = _artistOffset = 0; _browseLocalView = LocalView;
+        BrowseFailed = false; _browseItem = item; Changed(nameof(AlbumLeadArtist)); _browseQuery = query; _songOffset = _albumOffset = _artistOffset = 0; _browseLocalView = LocalView;
         CollectionViewSource.GetDefaultView(Results).SortDescriptions.Clear();
         if (item == null && section != "搜索") { Navigation = section; Settings.LastSection = section; SaveSettings(); }
         if (section != "搜索") { _searchCategory = "全部"; _formatFilter = "全部格式"; _artistFilter = _albumFilter = ""; Changed(nameof(SearchCategory)); Changed(nameof(FormatFilter)); Changed(nameof(ArtistFilter)); Changed(nameof(AlbumFilter)); }
         Section = section; Changed(nameof(BrowseQuery)); Changed(nameof(CanSortAlbums)); Changed(nameof(IsSearch)); Results.Clear(); Library.Clear(); HasMore = false; IsBrowsing = true; Status = "正在加载…";
         try { await FetchPageAsync(false, generation, _browseCts.Token); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { if (generation == _browseGeneration) BrowseFailed = true; throw; }
         finally { if (generation == _browseGeneration) { IsBrowsing = false; BrowseArrived?.Invoke(new()); Run(CompleteFilterAsync); } }
     }
     private BrowseState CaptureBrowseState()
@@ -73,7 +77,7 @@ public sealed partial class PlayerViewModel
         return new(Section, _browseQuery, _browseItem, Navigation, FormatFilter, ArtistFilter,
             AlbumFilter, SearchCategory, AlbumSort, Results.ToArray(), Library.ToArray(),
             _songOffset, _albumOffset, _artistOffset, HasMore,
-            IsBrowsing && Results.Count == 0 && Library.Count == 0, BrowseViewport, _browseLocalView,
+            (IsBrowsing || BrowseFailed) && Results.Count == 0 && Library.Count == 0, BrowseViewport, _browseLocalView,
             CollectionViewSource.GetDefaultView(Results).SortDescriptions.ToArray());
     }
     public async Task NavigateSectionAsync(string section)
@@ -99,7 +103,7 @@ public sealed partial class PlayerViewModel
         BrowseLeaving?.Invoke();
         _browseCts.Cancel(); _browseCts.Dispose(); _browseCts = new(); ++_browseGeneration;
         foreach (var album in Library) album.Cover = null;
-        _browseItem = state.Item; _browseQuery = state.Query;
+        BrowseFailed = false; _browseItem = state.Item; Changed(nameof(AlbumLeadArtist)); _browseQuery = state.Query;
         _songOffset = state.SongOffset; _albumOffset = state.AlbumOffset; _artistOffset = state.ArtistOffset;
         if (state.Section != "搜索") _beforeSearch = null;
         Navigation = state.Navigation; Section = state.Section;
@@ -120,8 +124,9 @@ public sealed partial class PlayerViewModel
     }
     public async Task LoadMoreAsync()
     {
-        if (!HasMore || IsBrowsing) return; IsBrowsing = true; int generation = _browseGeneration;
+        if (!HasMore || IsBrowsing) return; BrowseFailed = false; IsBrowsing = true; int generation = _browseGeneration;
         try { await FetchPageAsync(true, generation, _browseCts.Token); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { if (generation == _browseGeneration) BrowseFailed = true; throw; }
         finally { if (generation == _browseGeneration) IsBrowsing = false; }
     }
     private async Task FetchPageAsync(bool append, int generation, CancellationToken ct)
